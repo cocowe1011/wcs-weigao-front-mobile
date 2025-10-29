@@ -180,7 +180,7 @@ export default {
   data() {
     return {
       isRefreshing: false,
-      username: '张工',
+      username: '用户',
       currentOrder: {},
       queueGroups: [],
       statusBarHeight: 0,
@@ -215,6 +215,16 @@ export default {
     // 获取状态栏高度
     const systemInfo = uni.getSystemInfoSync()
     this.statusBarHeight = systemInfo.statusBarHeight
+	
+	// 从登录时保存的用户信息中读取用户名
+	try {
+	  const savedUsername = uni.getStorageSync('username')
+	  if (savedUsername) {
+		this.username = savedUsername
+	  }
+	} catch (error) {
+	  console.error('读取用户信息失败:', error)
+	}
     
     // 加载初始数据，不显示提示
     const hasOrder = await this.fetchOrderData(false)
@@ -300,11 +310,26 @@ export default {
       this.queueGroups = result
     },
     handleLogout() {
-      uni.clearStorageSync()
-      uni.reLaunch({
-        url: '/pages/login/login'
-      })
-    },
+	  uni.showModal({
+		title: '确认退出',
+		content: '确定要退出登录吗？',
+		confirmText: '确认退出',
+		cancelText: '取消',
+		success: (res) => {
+		  if (res.confirm) {
+			// 只清除登录相关的存储，保留车间配置
+			uni.removeStorageSync('token')
+			uni.removeStorageSync('username')
+			uni.removeStorageSync('current_workshop')
+			// 注意：不清除 workshop_config，保留车间配置
+			
+			uni.reLaunch({
+			  url: '/pages/login/login'
+			})
+		  }
+		}
+	  })
+	},
     
     // 获取订单数据
     async fetchOrderData(showToast = true) {
