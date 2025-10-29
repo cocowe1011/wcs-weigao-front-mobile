@@ -199,6 +199,16 @@ class AlarmWebSocketClient {
     return this.send(message);
   }
 
+  // 发送托盘数据变更通知（PC端收到后重新加载数据）
+  sendTrayDataChanged() {
+    const message = {
+      type: 'tray_data_changed',
+      timestamp: new Date().toISOString()
+    };
+    
+    return this.send(message);
+  }
+
   // 发送消息
   send(message) {
     if (this.socketTask && this.isConnected) {

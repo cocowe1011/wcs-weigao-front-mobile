@@ -11,7 +11,7 @@
         <view class="queue-grid">
           <view 
             class="queue-item"
-            v-for="queue in queues"
+            v-for="queue in availableQueues"
             :key="queue.id"
             @tap="handleSelect(queue)"
           >
@@ -25,6 +25,8 @@
 </template>
 
 <script>
+import request from '@/config/request'
+
 export default {
   name: 'QueueSelector',
   props: {
@@ -40,22 +42,14 @@ export default {
   data() {
     return {
       screenWidth: 375,
-      queues: [
-        { id: 1, name: '上货区', count: 5 },
-        { id: 2, name: '小车1区', count: 3 },
-        { id: 3, name: 'A1', count: 7 },
-        { id: 4, name: 'B1', count: 2 },
-        { id: 5, name: 'C1', count: 4 },
-        { id: 6, name: 'D1', count: 6 },
-        { id: 7, name: 'E1', count: 3 },
-        { id: 8, name: 'F1', count: 5 },
-        { id: 9, name: 'G1', count: 4 },
-        { id: 10, name: 'A2', count: 6 },
-        { id: 11, name: 'B2', count: 3 },
-        { id: 12, name: 'C2', count: 5 },
-		{ id: 13, name: 'D2', count: 5 },
-		{ id: 14, name: 'E2', count: 5 },
-      ]
+      queues: []
+    }
+  },
+  watch: {
+    visible(newVal) {
+      if (newVal) {
+        this.loadQueues()
+      }
     }
   },
   mounted() {
@@ -74,6 +68,34 @@ export default {
     handleSelect(queue) {
       this.$emit('select', queue)
       this.handleClose()
+    },
+    // 从服务器加载队列列表
+    async loadQueues() {
+      try {
+        const res = await request.post('/queue_info/queryQueueList')
+        if (res.code === '200' && Array.isArray(res.data)) {
+          // 解析每个队列的托盘数量
+          this.queues = res.data.map(queue => {
+            let trayCount = 0
+            try {
+              const trayInfo = queue.trayInfo ? JSON.parse(queue.trayInfo) : []
+              trayCount = Array.isArray(trayInfo) ? trayInfo.length : 0
+            } catch (e) {
+              console.error('解析托盘信息失败:', e)
+            }
+            return {
+              id: queue.id,
+              name: queue.queueName,
+              count: trayCount
+            }
+          })
+        } else {
+          this.queues = []
+        }
+      } catch (error) {
+        console.error('加载队列列表失败:', error)
+        this.queues = []
+      }
     }
   }
 }

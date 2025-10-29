@@ -4,7 +4,6 @@
       class="pallet-item" 
       v-for="pallet in pallets" 
       :key="pallet.id"
-      :class="{ 'is-moving': movingId === pallet.id }"
       @tap="handleTap(pallet)"
     >
       <view class="area-content">
@@ -14,17 +13,8 @@
       
       <view class="actions">
         <button 
-          class="action-btn move" 
-          @tap.stop="handleMove(pallet)"
-          :disabled="movingId === pallet.id"
-        >
-          <text class="iconfont icon-move"></text>
-          <text class="btn-text">移动</text>
-        </button>
-        <button 
           class="action-btn delete" 
           @tap.stop="handleDelete(pallet)"
-          :disabled="movingId === pallet.id"
         >
           <text class="iconfont icon-delete"></text>
           <text class="btn-text">删除</text>
@@ -50,14 +40,9 @@ export default {
   },
   data() {
     return {
-      movingId: null
     }
   },
   methods: {
-    handleMove(pallet) {
-      this.movingId = pallet.id
-      this.$emit('move', pallet)
-    },
     handleDelete(pallet) {
       uni.showModal({
         title: '确认删除',
@@ -111,21 +96,6 @@ export default {
       transform: scale(0.98);
     }
     
-    &.is-moving {
-      opacity: 0.7;
-      
-      &::after {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(255,255,255,0.6);
-        z-index: 1;
-      }
-    }
-    
     .area-content {
       flex: 1;
       margin-left: 20rpx;
@@ -170,21 +140,6 @@ export default {
         .iconfont {
           font-size: 28rpx;
           transition: transform 0.3s ease;
-        }
-        
-        &.move {
-          background: linear-gradient(135deg, $primary-color, $primary-light);
-          color: #fff;
-          box-shadow: 0 4rpx 15rpx rgba($primary-color, 0.3);
-          
-          &:active {
-            transform: translateY(2rpx);
-            box-shadow: 0 2rpx 8rpx rgba($primary-color, 0.2);
-            
-            .iconfont {
-              transform: rotate(-15deg);
-            }
-          }
         }
         
         &.delete {

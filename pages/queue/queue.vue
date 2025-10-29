@@ -17,7 +17,7 @@
       <!-- 区域信息卡片 -->
       <view class="area-card">
         <view class="area-info">
-          <text class="area-name">{{ areaName }}</text>
+          <text class="area-name">{{ getQueueDisplayName(areaName) || areaName }}</text>
           <text class="pallet-count">托盘数量：{{ palletList.length }}</text>
         </view>
         <button class="scan-btn" :class="{ loading: scanning }" @tap="handleScan">
@@ -41,20 +41,11 @@
           v-else
           :pallets="palletList"
           @delete="handleDelete"
-          @move="handleMove"
           :loading="loading"
           @pallet-tap="onPalletTap"
         ></pallet-list>
       </view>
     </scroll-view>
-    
-    <!-- 队列选择器 -->
-    <queue-selector
-      :visible="showQueueSelector"
-      :current-queue-id="areaId"
-      @close="showQueueSelector = false"
-      @select="handleQueueSelect"
-    />
     
     <!-- 订单信息弹窗 -->
     <uni-popup ref="orderPopup" type="center">
@@ -120,28 +111,124 @@
         </view>
       </view>
     </uni-popup>
+
+    <!-- PDA 扫码弹窗组件 -->
+    <pda-scan
+      :visible="showPdaScan"
+      @close="onPdaClose"
+      @confirm="onPdaConfirm"
+    />
+    
+    <!-- 无码模式托盘信息表单弹窗 -->
+    <uni-popup ref="noCodeFormPopup" type="bottom" :safe-area="false">
+      <view class="no-code-form-popup">
+        <view class="form-header">
+          <text class="form-title">填写托盘信息（无码模式）</text>
+          <text class="close-btn" @tap="closeNoCodeForm">×</text>
+        </view>
+        <view class="form-content-wrapper">
+          <scroll-view scroll-y class="form-content">
+            <view class="form-item">
+              <text class="form-label">托盘编号</text>
+              <view class="form-input-disabled">{{ noCodeForm.trayCode || '请先扫码' }}</view>
+            </view>
+            <view class="form-item">
+              <text class="form-label">批次号</text>
+              <input 
+                class="form-input" 
+                v-model="noCodeForm.batchId" 
+                placeholder="请输入批次号"
+                maxlength="50"
+              />
+            </view>
+            <view class="form-item">
+              <text class="form-label">订单号</text>
+              <input 
+                class="form-input" 
+                v-model="noCodeForm.orderId" 
+                placeholder="请输入订单号"
+                maxlength="50"
+              />
+            </view>
+            <view class="form-item">
+              <text class="form-label">指定预热房</text>
+              <picker 
+                mode="selector" 
+                :range="preheatingRooms" 
+                :value="noCodeForm.isPrint1Index"
+                @change="onPreheatingChange"
+              >
+                <view class="picker-view">
+                  <text :class="{ 'placeholder': !noCodeForm.isPrint1 }">
+                    {{ noCodeForm.isPrint1 || '请选择指定预热房' }}
+                  </text>
+                  <text class="iconfont icon-right"></text>
+                </view>
+              </picker>
+            </view>
+            <view class="form-item">
+              <text class="form-label">指定灭菌柜</text>
+              <picker 
+                mode="selector" 
+                :range="sterilizationRooms" 
+                :value="noCodeForm.isPrint2Index"
+                @change="onSterilizationChange"
+              >
+                <view class="picker-view">
+                  <text :class="{ 'placeholder': !noCodeForm.isPrint2 }">
+                    {{ noCodeForm.isPrint2 || '请选择指定灭菌柜' }}
+                  </text>
+                  <text class="iconfont icon-right"></text>
+                </view>
+              </picker>
+            </view>
+            <view class="form-item">
+              <text class="form-label">产品名称</text>
+              <input 
+                class="form-input" 
+                v-model="noCodeForm.productName" 
+                placeholder="请输入产品名称"
+                maxlength="100"
+              />
+            </view>
+            <view class="form-item">
+              <text class="form-label">产品编码</text>
+              <input 
+                class="form-input" 
+                v-model="noCodeForm.productCode" 
+                placeholder="请输入产品编码"
+                maxlength="50"
+              />
+            </view>
+          </scroll-view>
+        </view>
+        <view class="form-footer">
+          <button class="form-btn cancel-btn" @tap="closeNoCodeForm">取消</button>
+          <button class="form-btn confirm-btn" @tap="submitNoCodeForm">确定</button>
+        </view>
+      </view>
+    </uni-popup>
   </view>
 </template>
 
 <script>
 import PalletList from '@/components/pallet-list.vue'
-import QueueSelector from '@/components/queue-selector.vue'
 import ScanButton from '@/components/scan-button.vue'
 import request from '@/config/request'
+import PdaScan from '@/components/pda-scan.vue'
+import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
 
 export default {
   components: {
     PalletList,
-    QueueSelector,
-    ScanButton
+    ScanButton,
+    PdaScan
   },
   data() {
     return {
       areaId: '',
       areaName: '',
       palletList: [],
-      showQueueSelector: false,
-      currentPallet: null,
       scanning: false,
       loading: true,
       navBgColor: '#2B32B2',
@@ -150,12 +237,47 @@ export default {
       isLoaded: false,
       isReady: false,
       currentOrder: null,
-      orderInfo: {}  // 添加订单信息对象
+      orderInfo: {},  // 添加订单信息对象
+      // PDA 扫码弹窗
+      showPdaScan: false,
+      // 无码模式状态
+      isNoCodeMode: false,
+      // 无码模式表单数据
+      noCodeForm: {
+        trayCode: '',
+        batchId: '',
+        orderId: '',
+        isPrint1: '',
+        isPrint1Index: -1,
+        isPrint2: '',
+        isPrint2Index: -1,
+        productName: '',
+        productCode: ''
+      },
+      // 预热房选项
+      preheatingRooms: ['YR01', 'YR02', 'YR03', 'YR04', 'YR05', 'YR06', 'YR07'],
+      // 灭菌柜选项
+      sterilizationRooms: ['B', 'C', 'D', 'E', 'F', 'G', 'H'],
+      // WebSocket客户端
+      wsClient: null
     }
   },
   async onLoad(options) {
     this.areaId = options.queueId
     this.areaName = options.name
+    
+    // 初始化WebSocket连接
+    this.initWebSocket()
+    
+    // 从本地存储读取无码模式状态
+    try {
+      const savedNoCodeMode = uni.getStorageSync('noCodeMode')
+      if (savedNoCodeMode !== null && savedNoCodeMode !== undefined) {
+        this.isNoCodeMode = savedNoCodeMode
+      }
+    } catch (error) {
+      console.error('读取无码模式状态失败:', error)
+    }
     
     // 获取当前运行的订单
     await this.getCurrentOrder()
@@ -166,89 +288,202 @@ export default {
     goBack() {
       uni.navigateBack()
     },
+    // 初始化WebSocket连接
+    initWebSocket() {
+      this.wsClient = new AlarmWebSocketClient({
+        onConnected: () => {
+          console.log('WebSocket连接成功');
+        },
+        onDisconnected: () => {
+          console.log('WebSocket连接断开');
+        },
+        onError: (error) => {
+          console.error('WebSocket错误:', error);
+        }
+      });
+      
+      this.wsClient.connect();
+    },
+    // 发送托盘数据变更通知
+    notifyTrayDataChanged() {
+      if (this.wsClient && this.wsClient.isConnected) {
+        this.wsClient.sendTrayDataChanged();
+      }
+    },
+    // 队列名称映射函数（与PC端保持一致）
+    getQueueDisplayName(queueName) {
+      const mapping = {
+        // A1-G1 映射为 YR01A-YR07A
+        A1: 'YR01A',
+        B1: 'YR02A',
+        C1: 'YR03A',
+        D1: 'YR04A',
+        E1: 'YR05A',
+        F1: 'YR06A',
+        G1: 'YR07A',
+        // A2-G2 映射为 YR01B-YR07B
+        A2: 'YR01B',
+        B2: 'YR02B',
+        C2: 'YR03B',
+        D2: 'YR04B',
+        E2: 'YR05B',
+        F2: 'YR06B',
+        G2: 'YR07B',
+        // A3-G3 映射为 B-H
+        A3: 'B',
+        B3: 'C',
+        C3: 'D',
+        D3: 'E',
+        E3: 'F',
+        F3: 'G',
+        G3: 'H'
+      }
+      return mapping[queueName] || queueName
+    },
+    // 将内部队列名称（A-G）转换为预热房名称（YR01-YR07）
+    convertInternalToPreheating(internalName) {
+      const conversionMap = {
+        A: 'YR01',
+        B: 'YR02',
+        C: 'YR03',
+        D: 'YR04',
+        E: 'YR05',
+        F: 'YR06',
+        G: 'YR07'
+      }
+      return conversionMap[internalName] || internalName
+    },
     async handleScan() {
+      if (this.scanning) return
+      
+      // 无码模式：先扫码获取托盘编号，再填写其他信息
+      if (this.isNoCodeMode) {
+        // 重置表单
+        this.resetNoCodeForm()
+        // 打开扫码弹窗
+        this.showPdaScan = true
+        return
+      }
+      
+      // 有码模式：直接打开PDA扫码弹窗
+      this.showPdaScan = true
+    },
+    // 重置无码模式表单
+    resetNoCodeForm() {
+      this.noCodeForm = {
+        trayCode: '',
+        batchId: '',
+        orderId: '',
+        isPrint1: '',
+        isPrint1Index: -1,
+        isPrint2: '',
+        isPrint2Index: -1,
+        productName: '',
+        productCode: ''
+      }
+    },
+    // PDA 扫码回调
+    onPdaClose() {
+      this.showPdaScan = false
+    },
+    async onPdaConfirm(scanCode) {
+      this.showPdaScan = false
+      if (!scanCode) {
+        uni.showToast({ title: '无效的扫码结果', icon: 'none' })
+        return
+      }
+      
+      // 无码模式：扫码后打开表单填写其他信息
+      if (this.isNoCodeMode) {
+        this.noCodeForm.trayCode = scanCode
+        this.$refs.noCodeFormPopup.open()
+        return
+      }
+      
+      // 有码模式：直接处理
       if (this.scanning) return
       this.scanning = true
       
       try {
-        const scanResult = await uni.scanCode({
-          scanType: ['barCode'],  // 只支持条形码
-          onlyFromCamera: true    // 只允许从相机扫码
-        })
-        
-        console.log('扫码原始结果:', scanResult)
-        
-        // 检查是否有当前订单
+        // 有码模式：检查是否有当前订单
         if (!this.currentOrder?.orderId) {
           uni.showToast({
             title: '请先选择订单',
             icon: 'none'
           })
+          this.scanning = false
           return
         }
         
-        // 获取实际的扫码结果
-        const scanData = Array.isArray(scanResult) ? scanResult[1] : scanResult
-        const scanCode = scanData?.result
-        
-        console.log('处理后的扫码结果:', scanCode)
-        
-        if (!scanCode) {
-          uni.showToast({
-            title: '无效的扫码结果',
-            icon: 'none'
-          })
-          return
-        }
-        
-        // 构建新的托盘信息
+        // 构建有码模式的托盘信息（与PC端保持一致）
+        const currentTime = new Date().toISOString().replace('T', ' ').split('.')[0]
         const newTray = {
           trayCode: scanCode,
-          trayTime: new Date().toISOString().replace('T', ' ').split('.')[0],
-          batchId: this.currentOrder.batchId
+          trayTime: currentTime,
+          batchId: this.currentOrder.batchId || '',
+          infoId: this.currentOrder.id || '',
+          orderId: this.currentOrder.orderId || '',
+          isPrint1: this.currentOrder.isPrint1 || '',
+          isPrint2: this.currentOrder.isPrint2 || '',
+          isPrint3: this.currentOrder.isPrint3 || '',
+          inPut: this.currentOrder.inPut || '',
+          productName: this.currentOrder.productName || '',
+          productCode: this.currentOrder.productCode || '',
+          spec: this.currentOrder.spec || '',
+          hasSentPreheatCommand: false,
+          trayOrderCount: this.currentOrder.qrCode ? this.currentOrder.qrCode.split(',').length : 1
         }
         
-        console.log('新托盘信息:', newTray)
-        
-        // 添加到现有托盘列表
+        // 添加到现有托盘列表（保持完整参数）
         const updatedTrayInfo = this.palletList.map(tray => ({
           trayCode: tray.code || tray.trayCode,
           trayTime: tray.createTime || tray.trayTime,
-          batchId: tray.batchId || ''
+          batchId: tray.batchId || '',
+          infoId: tray.infoId || '',
+          orderId: tray.orderId || '',
+          isPrint1: tray.isPrint1 || '',
+          isPrint2: tray.isPrint2 || '',
+          isPrint3: tray.isPrint3 || '',
+          inPut: tray.inPut || '',
+          productName: tray.productName || '',
+          productCode: tray.productCode || '',
+          spec: tray.spec || '',
+          hasSentPreheatCommand: tray.hasSentPreheatCommand || false,
+          trayOrderCount: tray.trayOrderCount || 1
         }))
-        
-        // 添加新托盘
         updatedTrayInfo.push(newTray)
-        
-        console.log('更新的托盘列表:', updatedTrayInfo)
         
         // 更新队列信息
         const success = await this.updateQueueInfo(updatedTrayInfo)
-        
         if (success) {
-          uni.showToast({
-            title: '添加成功',
-            icon: 'success'
-          })
+          uni.showToast({ title: '添加成功', icon: 'success' })
         }
       } catch (error) {
-        console.error('扫码错误:', error)
-        uni.showToast({
-          title: '扫描失败',
-          icon: 'error'
-        })
+        console.error('扫码处理错误:', error)
+        uni.showToast({ title: '扫描失败', icon: 'error' })
       } finally {
         this.scanning = false
       }
     },
     async handleDelete(pallet) {
-      // 过滤掉要删除的托盘
+      // 过滤掉要删除的托盘，保持完整参数格式
       const updatedTrayInfo = this.palletList
         .filter(p => p.id !== pallet.id)  // 先过滤掉要删除的托盘
-        .map(tray => ({                   // 然后转换格式
+        .map(tray => ({                   // 然后转换格式，保持完整参数
           trayCode: tray.code || tray.trayCode,
           trayTime: tray.createTime || tray.trayTime,
-          batchId: tray.batchId || ''
+          batchId: tray.batchId || '',
+          infoId: tray.infoId || '',
+          orderId: tray.orderId || '',
+          isPrint1: tray.isPrint1 || '',
+          isPrint2: tray.isPrint2 || '',
+          isPrint3: tray.isPrint3 || '',
+          inPut: tray.inPut || '',
+          productName: tray.productName || '',
+          productCode: tray.productCode || '',
+          spec: tray.spec || '',
+          hasSentPreheatCommand: tray.hasSentPreheatCommand || false,
+          trayOrderCount: tray.trayOrderCount || 1
         }))
       
       // 更新队列信息
@@ -259,24 +494,6 @@ export default {
           title: '删除成功',
           icon: 'success'
         })
-      }
-    },
-    handleMove(pallet) {
-      this.currentPallet = pallet
-      this.showQueueSelector = true
-    },
-    handleQueueSelect(queue) {
-      if (this.currentPallet) {
-        const index = this.palletList.findIndex(p => p.id === this.currentPallet.id)
-        if (index > -1) {
-          this.palletList.splice(index, 1)
-          uni.showToast({
-            title: `移动到${queue.name}`,
-            icon: 'success'
-          })
-        }
-        this.currentPallet = null
-        this.showQueueSelector = false
       }
     },
     async fetchPalletList() {
@@ -299,7 +516,18 @@ export default {
             id: tray.trayCode, // 使用托盘编号作为唯一标识
             code: tray.trayCode,
             createTime: tray.trayTime,
-            batchId: tray.batchId
+            batchId: tray.batchId || '',
+            infoId: tray.infoId || '',
+            orderId: tray.orderId || '',
+            isPrint1: tray.isPrint1 || '',
+            isPrint2: tray.isPrint2 || '',
+            isPrint3: tray.isPrint3 || '',
+            inPut: tray.inPut || '',
+            productName: tray.productName || '',
+            productCode: tray.productCode || '',
+            spec: tray.spec || '',
+            hasSentPreheatCommand: tray.hasSentPreheatCommand || false,
+            trayOrderCount: tray.trayOrderCount || 1
           }))
         } else {
           this.palletList = []
@@ -332,11 +560,22 @@ export default {
     // 更新队列信息的公共方法
     async updateQueueInfo(trayInfo) {
       try {
-        // 确保每个托盘都有必要的字段
+        // 确保每个托盘都有必要的字段，保持与PC端一致的完整参数格式
         const formattedTrayInfo = trayInfo.map(tray => ({
           trayCode: tray.trayCode,
           trayTime: tray.trayTime,
-          batchId: tray.batchId
+          batchId: tray.batchId || '',
+          infoId: tray.infoId || '',
+          orderId: tray.orderId || '',
+          isPrint1: tray.isPrint1 || '',
+          isPrint2: tray.isPrint2 || '',
+          isPrint3: tray.isPrint3 || '',
+          inPut: tray.inPut || '',
+          productName: tray.productName || '',
+          productCode: tray.productCode || '',
+          spec: tray.spec || '',
+          hasSentPreheatCommand: tray.hasSentPreheatCommand || false,
+          trayOrderCount: tray.trayOrderCount || 1
         }))
         
         // 构建更新参数
@@ -350,6 +589,8 @@ export default {
         if (res.code === '200') {
           // 更新成功后重新获取最新数据
           await this.fetchPalletList()
+          // 发送WebSocket通知
+          this.notifyTrayDataChanged()
           return true
         } else {
           uni.showToast({
@@ -422,6 +663,117 @@ export default {
     // 关闭订单弹窗
     closeOrderPopup() {
       this.$refs.orderPopup.close()
+    },
+    // 关闭无码模式表单
+    closeNoCodeForm() {
+      this.$refs.noCodeFormPopup.close()
+      this.resetNoCodeForm()
+    },
+    // 预热房选择变化
+    onPreheatingChange(e) {
+      const index = parseInt(e.detail.value)
+      this.noCodeForm.isPrint1Index = index
+      this.noCodeForm.isPrint1 = this.preheatingRooms[index]
+    },
+    // 灭菌柜选择变化
+    onSterilizationChange(e) {
+      const index = parseInt(e.detail.value)
+      this.noCodeForm.isPrint2Index = index
+      this.noCodeForm.isPrint2 = this.sterilizationRooms[index]
+    },
+    // 提交无码模式表单
+    async submitNoCodeForm() {
+      // 验证必填字段
+      if (!this.noCodeForm.trayCode) {
+        uni.showToast({ title: '请先扫码获取托盘编号', icon: 'none' })
+        return
+      }
+      if (!this.noCodeForm.batchId) {
+        uni.showToast({ title: '请输入批次号', icon: 'none' })
+        return
+      }
+      if (!this.noCodeForm.orderId) {
+        uni.showToast({ title: '请输入订单号', icon: 'none' })
+        return
+      }
+      if (!this.noCodeForm.isPrint1) {
+        uni.showToast({ title: '请选择指定预热房', icon: 'none' })
+        return
+      }
+      if (!this.noCodeForm.isPrint2) {
+        uni.showToast({ title: '请选择指定灭菌柜', icon: 'none' })
+        return
+      }
+      if (!this.noCodeForm.productName) {
+        uni.showToast({ title: '请输入产品名称', icon: 'none' })
+        return
+      }
+      if (!this.noCodeForm.productCode) {
+        uni.showToast({ title: '请输入产品编码', icon: 'none' })
+        return
+      }
+      
+      if (this.scanning) return
+      this.scanning = true
+      
+      try {
+        // 构建无码模式的托盘信息（与PC端保持一致）
+        const currentTime = new Date().toISOString().replace('T', ' ').split('.')[0]
+        const newTray = {
+          trayCode: this.noCodeForm.trayCode, // 扫码获取的托盘编号
+          trayTime: currentTime,
+          batchId: this.noCodeForm.batchId,
+          infoId: '',
+          orderId: this.noCodeForm.orderId,
+          isPrint1: this.noCodeForm.isPrint1,
+          isPrint2: this.noCodeForm.isPrint2,
+          isPrint3: '',
+          inPut: '',
+          productName: this.noCodeForm.productName,
+          productCode: this.noCodeForm.productCode,
+          spec: '',
+          hasSentPreheatCommand: false,
+          trayOrderCount: 1
+        }
+        
+        // 添加到现有托盘列表（保持完整参数）
+        const updatedTrayInfo = this.palletList.map(tray => ({
+          trayCode: tray.code || tray.trayCode,
+          trayTime: tray.createTime || tray.trayTime,
+          batchId: tray.batchId || '',
+          infoId: tray.infoId || '',
+          orderId: tray.orderId || '',
+          isPrint1: tray.isPrint1 || '',
+          isPrint2: tray.isPrint2 || '',
+          isPrint3: tray.isPrint3 || '',
+          inPut: tray.inPut || '',
+          productName: tray.productName || '',
+          productCode: tray.productCode || '',
+          spec: tray.spec || '',
+          hasSentPreheatCommand: tray.hasSentPreheatCommand || false,
+          trayOrderCount: tray.trayOrderCount || 1
+        }))
+        updatedTrayInfo.push(newTray)
+        
+        // 更新队列信息
+        const success = await this.updateQueueInfo(updatedTrayInfo)
+        if (success) {
+          uni.showToast({ title: '添加成功', icon: 'success' })
+          this.closeNoCodeForm()
+        }
+      } catch (error) {
+        console.error('添加托盘失败:', error)
+        uni.showToast({ title: '添加失败', icon: 'error' })
+      } finally {
+        this.scanning = false
+      }
+    }
+  },
+  beforeDestroy() {
+    // 组件销毁前断开WebSocket连接
+    if (this.wsClient) {
+      this.wsClient.disconnect();
+      this.wsClient = null;
     }
   }
 }
@@ -726,6 +1078,140 @@ export default {
       color: #999;
       font-size: 28rpx;
       padding: 40rpx 0;
+    }
+  }
+}
+
+// 无码模式表单弹窗样式
+.no-code-form-popup {
+  background: #fff;
+  border-radius: 20rpx 20rpx 0 0;
+  max-height: 80vh;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  
+  .form-header {
+    padding: 30rpx;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
+    
+    .form-title {
+      font-size: 32rpx;
+      font-weight: bold;
+      color: #333;
+    }
+    
+    .close-btn {
+      font-size: 40rpx;
+      color: #999;
+      padding: 0 20rpx;
+    }
+  }
+  
+  .form-content-wrapper {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    
+    .form-content {
+      height: 100%;
+      padding: 30rpx;
+      box-sizing: border-box;
+    }
+  }
+  
+  .form-item {
+    margin-bottom: 30rpx;
+    
+    .form-label {
+      display: block;
+      font-size: 28rpx;
+      color: #333;
+      margin-bottom: 16rpx;
+      font-weight: 500;
+    }
+    
+    .form-input {
+      width: 100%;
+      height: 80rpx;
+      padding: 0 20rpx;
+      border: 1px solid #ddd;
+      border-radius: 8rpx;
+      font-size: 28rpx;
+      background: #fff;
+      box-sizing: border-box;
+      
+      &:focus {
+        border-color: #1a2a6c;
+      }
+    }
+    
+    .form-input-disabled {
+      width: 100%;
+      height: 80rpx;
+      padding: 0 20rpx;
+      border: 1px solid #ddd;
+      border-radius: 8rpx;
+      font-size: 28rpx;
+      background: #f5f5f5;
+      display: flex;
+      align-items: center;
+      color: #333;
+      box-sizing: border-box;
+    }
+    
+    .picker-view {
+      width: 100%;
+      height: 80rpx;
+      padding: 0 20rpx;
+      border: 1px solid #ddd;
+      border-radius: 8rpx;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #fff;
+      box-sizing: border-box;
+      
+      .placeholder {
+        color: #999;
+      }
+      
+      .iconfont {
+        font-size: 24rpx;
+        color: #999;
+      }
+    }
+  }
+  
+  .form-footer {
+    padding: 20rpx 30rpx;
+    padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
+    border-top: 1px solid #eee;
+    display: flex;
+    gap: 20rpx;
+    flex-shrink: 0;
+    
+    .form-btn {
+      flex: 1;
+      height: 80rpx;
+      border-radius: 8rpx;
+      font-size: 28rpx;
+      border: none;
+      
+      &.cancel-btn {
+        background: #f5f5f5;
+        color: #666;
+      }
+      
+      &.confirm-btn {
+        background: #1a2a6c;
+        color: #fff;
+      }
     }
   }
 }

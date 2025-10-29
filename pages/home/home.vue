@@ -22,14 +22,20 @@
         <!-- 订单信息卡片 -->
         <order-card :order="currentOrder"></order-card>
         
-        <!-- 暂无数据提示 -->
-        <view v-if="!currentOrder.id" class="empty-state">
-          <text class="iconfont icon-empty"></text>
-          <text class="empty-text">暂无队列数据</text>
+        <!-- 无订单时的无码上货设置 -->
+        <view v-if="!currentOrder.id" class="no-order-section">
+          <view class="no-order-tip">
+            <text class="iconfont icon-empty"></text>
+            <text class="empty-text">暂无运行订单</text>
+          </view>
+          <view class="no-code-toggle">
+            <text class="toggle-label">无码上货模式</text>
+            <switch :checked="isNoCodeMode" @change="handleNoCodeModeChange" color="#1a2a6c" />
+          </view>
         </view>
         
         <!-- 队列区域列表 -->
-        <view v-else class="queue-areas">
+        <view v-if="currentOrder.id || isNoCodeMode" class="queue-areas">
           <view 
             class="queue-group" 
             v-for="group in queueGroups" 
@@ -44,7 +50,7 @@
                 @tap="navigateToQueue(area)"
               >
                 <view class="area-content">
-                  <text class="area-name">{{ area.name }}</text>
+                  <text class="area-name">{{ area.displayName || area.name }}</text>
                   <text class="pallet-count">托盘数：{{ area.palletCount }}</text>
                 </view>
                 <view class="area-decoration">
@@ -165,6 +171,13 @@
         </view>
       </view>
     </view>
+
+    <!-- PDA 扫码弹窗组件 -->
+    <pda-scan
+      :visible="showPdaScan"
+      @close="onPdaClose"
+      @confirm="onPdaConfirm"
+    />
   </view>
 </template>
 
@@ -172,10 +185,12 @@
 import OrderCard from '@/components/order-card.vue'
 import request from '@/config/request'
 import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
+import PdaScan from '@/components/pda-scan.vue'
 
 export default {
   components: {
-    OrderCard
+    OrderCard,
+    PdaScan
   },
   data() {
     return {
@@ -194,6 +209,9 @@ export default {
       showAlarmModal: false,
       // 扫码相关数据
       showScanModal: false,
+      // PDA 扫码弹窗
+      showPdaScan: false,
+      selectedScanLocation: null,
       scanLocations: [
         { label: '一楼接货站台', value: '一楼接货站台' },
         { label: '一楼上货区', value: '一楼上货区' },
@@ -202,7 +220,9 @@ export default {
         { label: '三楼A接货', value: '三楼A接货' },
         { label: '三楼B接货', value: '三楼B接货' },
         { label: '下货扫码处', value: '下货扫码处' }
-      ]
+      ],
+      // 无码上货模式
+      isNoCodeMode: false
     }
   },
   computed: {
@@ -226,9 +246,19 @@ export default {
 	  console.error('读取用户信息失败:', error)
 	}
     
+    // 无码上货模式开关默认关闭（不再从本地存储读取）
+    this.isNoCodeMode = false
+    // 同步更新本地存储
+    try {
+      uni.setStorageSync('noCodeMode', false)
+    } catch (error) {
+      console.error('更新无码模式状态失败:', error)
+    }
+    
     // 加载初始数据，不显示提示
     const hasOrder = await this.fetchOrderData(false)
-    if (hasOrder) {
+    if (hasOrder || this.isNoCodeMode) {
+      // 有订单或无码模式都显示队列
       await this.getQueueData()
     } else {
       this.queueGroups = []
@@ -259,6 +289,36 @@ export default {
       }
     },
 
+    // 队列名称映射函数（与PC端保持一致）
+    getQueueDisplayName(queueName) {
+      const mapping = {
+        // A1-G1 映射为 YR01A-YR07A
+        A1: 'YR01A',
+        B1: 'YR02A',
+        C1: 'YR03A',
+        D1: 'YR04A',
+        E1: 'YR05A',
+        F1: 'YR06A',
+        G1: 'YR07A',
+        // A2-G2 映射为 YR01B-YR07B
+        A2: 'YR01B',
+        B2: 'YR02B',
+        C2: 'YR03B',
+        D2: 'YR04B',
+        E2: 'YR05B',
+        F2: 'YR06B',
+        G2: 'YR07B',
+        // A3-G3 映射为 B-H
+        A3: 'B',
+        B3: 'C',
+        C3: 'D',
+        D3: 'E',
+        E3: 'F',
+        F3: 'G',
+        G3: 'H'
+      }
+      return mapping[queueName] || queueName
+    },
     processQueueData(data) {
       // 定义区域分组
       const groups = {
@@ -291,7 +351,8 @@ export default {
 
             areas.push({
               id: globalIndex++,
-              name: areaData.queueName,
+              name: areaData.queueName, // 保存原始名称用于查询
+              displayName: this.getQueueDisplayName(areaData.queueName), // 显示用的名称
               palletCount: trayInfo.length,
               queueId: areaData.id  // 使用接口返回的原始id
             })
@@ -379,13 +440,43 @@ export default {
     // 下拉刷新
     async onRefresh() {
       this.isRefreshing = true
+      // 下拉刷新时，沿用本地存储的无码模式状态
+      try {
+        const savedNoCodeMode = uni.getStorageSync('noCodeMode')
+        if (savedNoCodeMode !== null && savedNoCodeMode !== undefined) {
+          this.isNoCodeMode = savedNoCodeMode
+        }
+      } catch (error) {
+        console.error('读取无码模式状态失败:', error)
+      }
+      
       const hasOrder = await this.fetchOrderData()
-      if (hasOrder) {
+      if (hasOrder || this.isNoCodeMode) {
         await this.getQueueData()
       } else {
         this.queueGroups = []
       }
       this.isRefreshing = false
+    },
+    // 无码模式切换
+    handleNoCodeModeChange(e) {
+      this.isNoCodeMode = e.detail.value
+      // 保存到本地存储
+      try {
+        uni.setStorageSync('noCodeMode', this.isNoCodeMode)
+      } catch (error) {
+        console.error('保存无码模式状态失败:', error)
+      }
+      
+      // 切换模式时重新加载队列数据
+      if (this.isNoCodeMode) {
+        this.getQueueData()
+      } else {
+        // 如果不是无码模式且没有订单，清空队列
+        if (!this.currentOrder.id) {
+          this.queueGroups = []
+        }
+      }
     },
     
     navigateToQueue(area) {
@@ -591,59 +682,38 @@ export default {
         });
         return;
       }
+      // 保存地点并打开PDA扫码弹窗
+      this.selectedScanLocation = location;
+      this.showPdaScan = true;
+    },
 
-      try {
-        // 调用扫码功能
-        const scanResult = await uni.scanCode({
-          scanType: ['barCode'],  // 只支持条形码
-          onlyFromCamera: true    // 只允许从相机扫码
-        });
-        
-        console.log('扫码结果:', scanResult);
-        
-        // 获取扫码结果
-        const scanData = Array.isArray(scanResult) ? scanResult[1] : scanResult;
-        const trayCode = scanData?.result;
-        
-        if (!trayCode) {
-          uni.showToast({
-            title: '无效的扫码结果',
-            icon: 'none'
-          });
-          return;
-        }
-
-        // 显示加载提示
-        uni.showLoading({
-          title: '处理中...',
-          mask: true
-        });
-
-        // 发送扫码消息到PC端
-        const success = this.wsClient.sendScanCode(location.value, trayCode);
-        
-        if (!success) {
-          uni.hideLoading();
-          uni.showToast({
-            title: '发送失败，请检查连接',
-            icon: 'none'
-          });
-          return;
-        }
-        
-        // 设置超时机制，10秒后自动隐藏loading
-        setTimeout(() => {
-          uni.hideLoading();
-        }, 10000);
-        
-      } catch (error) {
-        console.error('扫码失败:', error);
-        uni.hideLoading(); // 确保隐藏loading
+    // PDA 扫码弹窗回调
+    onPdaClose() {
+      this.showPdaScan = false;
+    },
+    onPdaConfirm(scanCode) {
+      this.showPdaScan = false;
+      if (!this.selectedScanLocation || !scanCode) return;
+      
+      // 显示加载提示
+      uni.showLoading({
+        title: '处理中...',
+        mask: true
+      });
+      
+      const success = this.wsClient && this.wsClient.sendScanCode(this.selectedScanLocation.value, scanCode);
+      if (!success) {
+        uni.hideLoading();
         uni.showToast({
-          title: '扫码失败',
+          title: '发送失败，请检查连接',
           icon: 'none'
         });
+        return;
       }
+      // 设置超时机制，10秒后自动隐藏loading
+      setTimeout(() => {
+        uni.hideLoading();
+      }, 10000);
     },
 
     // 处理扫码响应
@@ -860,6 +930,47 @@ export default {
     .empty-text {
       font-size: 32rpx;
       color: #999;
+    }
+  }
+  
+  .no-order-section {
+    background: #fff;
+    padding: 40rpx 30rpx;
+    border-radius: $border-radius;
+    margin-bottom: 30rpx;
+    box-shadow: $card-shadow;
+    
+    .no-order-tip {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 30rpx;
+      
+      .iconfont {
+        font-size: 120rpx;
+        color: #ccc;
+        margin-bottom: 20rpx;
+      }
+      
+      .empty-text {
+        font-size: 32rpx;
+        color: #999;
+      }
+    }
+    
+    .no-code-toggle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20rpx;
+      background: #f8f9fa;
+      border-radius: 12rpx;
+      
+      .toggle-label {
+        font-size: 28rpx;
+        color: #333;
+        font-weight: 500;
+      }
     }
   }
 }
