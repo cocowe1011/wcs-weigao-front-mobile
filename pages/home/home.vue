@@ -25,10 +25,8 @@
         :class="{ active: activeTab === 'order' }"
         @tap="activeTab = 'order'"
       >
-        <view class="tab-icon icon-order">
-          <view class="bar b-full"></view>
-          <view class="bar b-full"></view>
-          <view class="bar b-short"></view>
+        <view class="tab-icon">
+          <uni-icons type="list" size="24" :color="activeTab === 'order' ? '#1a2a6c' : '#9ca3af'"></uni-icons>
         </view>
         <text class="tab-label">订单设置</text>
       </view>
@@ -39,12 +37,8 @@
         :class="{ active: activeTab === 'scan' }"
         @tap="activeTab = 'scan'"
       >
-        <view class="tab-icon icon-scan">
-          <view class="corner c-tl"></view>
-          <view class="corner c-tr"></view>
-          <view class="corner c-bl"></view>
-          <view class="corner c-br"></view>
-          <view class="center-sq"></view>
+        <view class="tab-icon">
+          <uni-icons type="scan" size="24" :color="activeTab === 'scan' ? '#1a2a6c' : '#9ca3af'"></uni-icons>
         </view>
         <text class="tab-label">扫码复检</text>
       </view>
@@ -55,9 +49,8 @@
         :class="{ active: activeTab === 'info' }"
         @tap="activeTab = 'info'"
       >
-        <view class="tab-icon icon-edit">
-          <view class="pen-body"></view>
-          <view class="pen-underline"></view>
+        <view class="tab-icon">
+          <uni-icons type="compose" size="24" :color="activeTab === 'info' ? '#1a2a6c' : '#9ca3af'"></uni-icons>
         </view>
         <text class="tab-label">信息修改</text>
       </view>
@@ -68,10 +61,8 @@
         :class="{ active: activeTab === 'manual' }"
         @tap="activeTab = 'manual'"
       >
-        <view class="tab-icon icon-ctrl">
-          <view class="ctrl-ring"></view>
-          <view class="ctrl-v"></view>
-          <view class="ctrl-h"></view>
+        <view class="tab-icon">
+          <uni-icons type="settings" size="24" :color="activeTab === 'manual' ? '#1a2a6c' : '#9ca3af'"></uni-icons>
         </view>
         <text class="tab-label">手动控制</text>
       </view>
@@ -221,120 +212,11 @@ export default {
 
 // ---- Tab 图标基础 ----
 .tab-icon {
-  width: 44rpx;
-  height: 44rpx;
+  width: 48rpx;
+  height: 48rpx;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-// 订单设置：三横线（列表）
-.icon-order {
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 8rpx;
-
-  .bar {
-    height: 4rpx;
-    border-radius: 2rpx;
-    background: var(--icon-c);
-    transition: background 0.2s;
-  }
-
-  .b-full { width: 44rpx; }
-  .b-short { width: 28rpx; }
-}
-
-// 扫码复检：扫描框（四角 + 中心方块）
-.icon-scan {
-  .corner {
-    position: absolute;
-    width: 14rpx;
-    height: 14rpx;
-    border-style: solid;
-    border-color: var(--icon-c);
-    transition: border-color 0.2s;
-  }
-
-  .c-tl { top: 0; left: 0; border-width: 4rpx 0 0 4rpx; }
-  .c-tr { top: 0; right: 0; border-width: 4rpx 4rpx 0 0; }
-  .c-bl { bottom: 0; left: 0; border-width: 0 0 4rpx 4rpx; }
-  .c-br { bottom: 0; right: 0; border-width: 0 4rpx 4rpx 0; }
-
-  .center-sq {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 16rpx;
-    height: 16rpx;
-    border: 3rpx solid var(--icon-c);
-    transition: border-color 0.2s;
-  }
-}
-
-// 信息修改：钢笔（斜矩形 + 底划线）
-.icon-edit {
-  .pen-body {
-    position: absolute;
-    width: 28rpx;
-    height: 10rpx;
-    background: var(--icon-c);
-    border-radius: 2rpx 6rpx 6rpx 2rpx;
-    top: 6rpx;
-    right: 0;
-    transform: rotate(-38deg);
-    transform-origin: right center;
-    transition: background 0.2s;
-  }
-
-  .pen-underline {
-    position: absolute;
-    bottom: 2rpx;
-    left: 0;
-    right: 0;
-    height: 4rpx;
-    background: var(--icon-c);
-    border-radius: 2rpx;
-    transition: background 0.2s;
-  }
-}
-
-// 手动控制：准星（圆环 + 十字线）
-.icon-ctrl {
-  .ctrl-ring {
-    position: absolute;
-    top: 8rpx;
-    left: 8rpx;
-    right: 8rpx;
-    bottom: 8rpx;
-    border: 3rpx solid var(--icon-c);
-    border-radius: 50%;
-    transition: border-color 0.2s;
-  }
-
-  .ctrl-v {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    width: 3rpx;
-    margin-left: -1.5rpx;
-    background: var(--icon-c);
-    transition: background 0.2s;
-  }
-
-  .ctrl-h {
-    position: absolute;
-    top: 50%;
-    left: 0;
-    right: 0;
-    height: 3rpx;
-    margin-top: -1.5rpx;
-    background: var(--icon-c);
-    transition: background 0.2s;
-  }
 }
 </style>

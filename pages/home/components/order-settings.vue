@@ -1,14 +1,5 @@
 <template>
-  <view class="home-container">
-    <!-- 状态栏占位 -->
-    <view class="status-bar" :style="{ height: statusBarHeight + 'px' }"></view>
-    
-    <!-- 导航栏 -->
-    <view class="header">
-      <view class="welcome">欢迎回来，{{ username }}</view>
-      <view class="logout" @tap="handleLogout">退出登录</view>
-    </view>
-    
+  <view class="order-settings">
     <!-- 可滚动的内容区域 -->
     <scroll-view 
       class="scroll-content"
@@ -171,13 +162,12 @@ import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
 import PdaScan from '@/components/pda-scan.vue'
 
 export default {
+  name: 'OrderSettings',
   components: {
     PdaScan
   },
   data() {
     return {
-      username: '用户',
-      statusBarHeight: 0,
       pageReady: false,
       // WebSocket相关数据
       wsClient: null,
@@ -201,24 +191,9 @@ export default {
       return this.alarmLogs.filter(alarm => alarm.unread).length;
     }
   },
-  async onLoad() {
-    // 获取状态栏高度
-    const systemInfo = uni.getSystemInfoSync()
-    this.statusBarHeight = systemInfo.statusBarHeight
-	
-    // 从登录时保存的用户信息中读取用户名
-	try {
-	  const savedUsername = uni.getStorageSync('username')
-	  if (savedUsername) {
-		this.username = savedUsername
-	  }
-	} catch (error) {
-	  console.error('读取用户信息失败:', error)
-	}
-    
+  mounted() {
     // 初始化WebSocket连接
     this.initWebSocket()
-    
     // 显示页面
     this.pageReady = true
   },
@@ -230,28 +205,6 @@ export default {
     }
   },
   methods: {
-    handleLogout() {
-	  uni.showModal({
-		title: '确认退出',
-		content: '确定要退出登录吗？',
-		confirmText: '确认退出',
-		cancelText: '取消',
-		success: (res) => {
-		  if (res.confirm) {
-			// 只清除登录相关的存储，保留车间配置
-			uni.removeStorageSync('token')
-			uni.removeStorageSync('username')
-			uni.removeStorageSync('current_workshop')
-			// 注意：不清除 workshop_config，保留车间配置
-			
-			uni.reLaunch({
-			  url: '/pages/login/login'
-			})
-		  }
-		}
-	  })
-	},
-
     // ============ WebSocket和报警日志相关方法 ============
     // 初始化WebSocket连接
     initWebSocket() {
@@ -494,162 +447,123 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.home-container {
-  min-height: 100vh;
+.order-settings {
+  height: 100%;
   background: #f5f7fa;
+}
+
+.scroll-content {
+  height: 100%;
+  transition: opacity 0.3s ease;
+}
+
+.content {
+  padding: 30rpx;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 220rpx);
   
-  .status-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    background: linear-gradient(90deg, #1a2a6c, #b21f1f);
-    z-index: 101;
-  }
-  
-  .header {
-    position: fixed;
-    top: var(--status-bar-height);
-    left: 0;
-    right: 0;
-    background: linear-gradient(90deg, #1a2a6c, #b21f1f);
-    padding: 20rpx 30rpx;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    color: #fff;
-    z-index: 100;
-    
-    .welcome {
-      font-size: 32rpx;
+  .queue-section {
+    .queue-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24rpx;
+      padding: 0 8rpx;
+      .queue-title {
+        font-size: 32rpx;
+        font-weight: 600;
+        color: #1f2937;
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+      }
+      .queue-count {
+        font-size: 24rpx;
+        color: #6b7280;
+        background: rgba(107, 114, 128, 0.08);
+        padding: 6rpx 16rpx;
+        border-radius: 20rpx;
+      }
     }
-    
-    .logout {
-      font-size: 28rpx;
-      padding: 10rpx 20rpx;
-      border: 1px solid rgba(255,255,255,0.5);
-      border-radius: 30rpx;
+    .queue-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 60rpx 30rpx;
+      .empty-icon {
+        font-size: 80rpx;
+        margin-bottom: 16rpx;
+      }
+      .empty-text {
+        font-size: 28rpx;
+        color: #999;
+      }
     }
-  }
-  
-  .scroll-content {
-    position: fixed;
-    top: calc(var(--status-bar-height) + 88rpx);
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 1;
-    transition: opacity 0.3s ease;
-  }
-  
-  .content {
-    padding: 30rpx;
-    padding-bottom: calc(env(safe-area-inset-bottom) + 220rpx);
-    
-    .queue-section {
-      .queue-header {
+    .pallet-list {
+      display: flex;
+      flex-direction: column;
+    }
+    .pallet-card {
+      background: #ffffff;
+      border-radius: 16rpx;
+      overflow: hidden;
+      box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
+      margin-bottom: 30rpx;
+      position: relative;
+      .card-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 24rpx;
-        padding: 0 8rpx;
-        .queue-title {
-          font-size: 32rpx;
-          font-weight: 600;
-          color: #1f2937;
+        padding: 20rpx 24rpx;
+        background: #f9fafb;
+        border-bottom: 1px solid #f3f4f6;
+        .position-badge {
+          background: #2563eb;
+          color: #fff;
+          font-size: 26rpx;
+          font-weight: 500;
+          padding: 6rpx 16rpx;
+          border-radius: 8rpx;
         }
         .header-right {
           display: flex;
           align-items: center;
+          gap: 12rpx;
         }
-        .queue-count {
-          font-size: 24rpx;
-          color: #6b7280;
-          background: rgba(107, 114, 128, 0.08);
+        .remove-tray-btn {
+          background: #ef4444;
+          color: #fff;
           padding: 6rpx 16rpx;
-          border-radius: 20rpx;
+          border-radius: 6rpx;
+          font-size: 24rpx;
+          font-weight: 500;
+          &:active {
+            background: #dc2626;
+          }
         }
       }
-      .queue-empty {
+      .card-content {
+        padding: 20rpx 24rpx;
         display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 60rpx 30rpx;
-        .empty-icon {
-          font-size: 80rpx;
+        .left-section {
+          flex: 1;
+        }
+        .info-item {
+          display: flex;
           margin-bottom: 16rpx;
-        }
-        .empty-text {
-          font-size: 28rpx;
-          color: #999;
-        }
-      }
-      .pallet-list {
-        display: flex;
-        flex-direction: column;
-      }
-      .pallet-card {
-        background: #ffffff;
-        border-radius: 16rpx;
-        overflow: hidden;
-        box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
-        margin-bottom: 30rpx;
-        position: relative;
-        .card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 20rpx 24rpx;
-          background: #f9fafb;
-          border-bottom: 1px solid #f3f4f6;
-          .position-badge {
-            background: #2563eb;
-            color: #fff;
+          &:last-child {
+            margin-bottom: 0;
+          }
+          .info-label {
+            flex: 0 0 140rpx;
             font-size: 26rpx;
-            font-weight: 500;
-            padding: 6rpx 16rpx;
-            border-radius: 8rpx;
+            color: #6b7280;
           }
-          .header-right {
-            display: flex;
-            align-items: center;
-            gap: 12rpx;
-          }
-          .remove-tray-btn {
-            background: #ef4444;
-            color: #fff;
-            padding: 6rpx 16rpx;
-            border-radius: 6rpx;
-            font-size: 24rpx;
-            font-weight: 500;
-            &:active {
-              background: #dc2626;
-            }
-          }
-        }
-        .card-content {
-          padding: 20rpx 24rpx;
-          display: flex;
-          .left-section {
+          .info-value {
             flex: 1;
-          }
-          .info-item {
-            display: flex;
-            margin-bottom: 16rpx;
-            &:last-child {
-              margin-bottom: 0;
-            }
-            .info-label {
-              flex: 0 0 140rpx;
-              font-size: 26rpx;
-              color: #6b7280;
-            }
-            .info-value {
-              flex: 1;
-              font-size: 28rpx;
-              color: #1f2937;
-              font-weight: 500;
-            }
+            font-size: 28rpx;
+            color: #1f2937;
+            font-weight: 500;
           }
         }
       }
