@@ -13,49 +13,43 @@
     <scroll-view 
       class="scroll-content"
       scroll-y
-      :refresher-enabled="true"
-      :refresher-triggered="isRefreshing"
-      @refresherrefresh="onRefresh"
       :style="{ opacity: pageReady ? 1 : 0 }"
     >
       <view class="content">
-        <!-- 订单信息卡片 -->
-        <order-card :order="currentOrder"></order-card>
-        
-        <!-- 无订单时的无码上货设置 -->
-        <view v-if="!currentOrder.id" class="no-order-section">
-          <view class="no-order-tip">
-            <text class="iconfont icon-empty"></text>
-            <text class="empty-text">暂无运行订单</text>
+        <!-- 上货队列（参考 workshop-one 卡片样式） -->
+        <view class="queue-section">
+          <view class="queue-header">
+            <text class="queue-title">上货队列</text>
+            <view class="header-right">
+              <text class="queue-count">共 {{ trayQueue.length }} 个托盘</text>
+            </view>
           </view>
-          <view class="no-code-toggle">
-            <text class="toggle-label">无码上货模式</text>
-            <switch :checked="isNoCodeMode" @change="handleNoCodeModeChange" color="#1a2a6c" />
+          <view v-if="trayQueue.length === 0" class="queue-empty">
+            <text class="empty-icon">📋</text>
+            <text class="empty-text">暂无托盘，点击「扫码上货」添加</text>
           </view>
-        </view>
-        
-        <!-- 队列区域列表 -->
-        <view v-if="currentOrder.id || isNoCodeMode" class="queue-areas">
-          <view 
-            class="queue-group" 
-            v-for="group in queueGroups" 
-            :key="group.title"
-          >
-            <view class="section-title">{{ group.title }}</view>
-            <view class="area-grid">
-              <view 
-                class="area-item" 
-                v-for="area in group.areas" 
-                :key="area.id"
-                @tap="navigateToQueue(area)"
-              >
-                <view class="area-content">
-                  <text class="area-name">{{ area.displayName || area.name }}</text>
-                  <text class="pallet-count">托盘数：{{ area.palletCount }}</text>
+          <view v-else class="pallet-list">
+            <view 
+              class="pallet-card" 
+              v-for="(item, index) in trayQueue" 
+              :key="item.id"
+            >
+              <view class="card-header">
+                <view class="position-badge">#{{ index + 1 }}</view>
+                <view class="header-right">
+                  <view class="remove-tray-btn" @tap.stop="removeTray(item)">移除</view>
                 </view>
-                <view class="area-decoration">
-                  <text class="area-id">{{ area.id }}</text>
-                  <text class="iconfont icon-right"></text>
+              </view>
+              <view class="card-content">
+                <view class="left-section">
+                  <view class="info-item">
+                    <text class="info-label">托盘码</text>
+                    <text class="info-value">{{ item.trayCode }}</text>
+                  </view>
+                  <view class="info-item">
+                    <text class="info-label">添加时间</text>
+                    <text class="info-value">{{ formatTrayTime(item.addTime) }}</text>
+                  </view>
                 </view>
               </view>
             </view>
@@ -63,6 +57,18 @@
         </view>
       </view>
     </scroll-view>
+	
+	<!-- 扫码悬浮按钮：点击直接扫码 -->
+	<view class="fab-btn scan-fab" @tap="openScanDirect">
+	  <text class="fab-text">扫码</text>
+	  <text class="fab-text">上货</text>
+	</view>
+    
+    <!-- PLC控制悬浮按钮 -->
+    <view class="fab-btn plc-fab" @tap="showPlcModal">
+      <text class="fab-text">PLC</text>
+      <text class="fab-text">控制</text>
+    </view>
     
     <!-- 报警日志悬浮按钮 -->
     <view class="fab-btn alarm-fab" :class="{'has-unread-alarms': unreadAlarmCount > 0}" @tap="toggleAlarmModal">
@@ -71,11 +77,7 @@
       <view v-if="unreadAlarmCount > 0" class="alarm-badge">{{ unreadAlarmCount }}</view>
     </view>
     
-    <!-- 扫码悬浮按钮 -->
-    <view class="fab-btn scan-fab" @tap="showScanLocationModal">
-      <text class="fab-text">扫码</text>
-      <text class="fab-text">上货</text>
-    </view>
+    
     
     <!-- 报警日志弹窗 -->
     <view class="modal-overlay" v-if="showAlarmModal" @tap="toggleAlarmModal">
@@ -140,34 +142,17 @@
       </view>
     </view>
     
-    <!-- 扫码地点选择弹窗 -->
-    <view class="modal-overlay" v-if="showScanModal" @tap="hideScanLocationModal">
-      <view class="scan-modal-content" @tap.stop>
-        <view class="scan-modal-header">
-          <text class="scan-modal-title">选择扫码地点</text>
-          <view class="scan-header-actions">
-            <view class="connection-status" :class="{'connected': wsStatus.isConnected, 'disconnected': !wsStatus.isConnected}">
-              <text class="status-dot"></text>
-              <text class="status-text">{{ wsStatus.isConnected ? '已连接' : '未连接' }}</text>
-            </view>
-            <view class="scan-close-btn" @tap="hideScanLocationModal">
-              <text class="close-text">×</text>
-            </view>
+    <!-- PLC控制弹窗（暂为占位页） -->
+    <view class="modal-overlay" v-if="showPlcPage" @tap="hidePlcModal">
+      <view class="plc-modal-content" @tap.stop>
+        <view class="plc-modal-header">
+          <text class="plc-modal-title">PLC控制</text>
+          <view class="plc-close-btn" @tap="hidePlcModal">
+            <text class="close-text">×</text>
           </view>
         </view>
-        
-        <view class="scan-modal-body">
-          <view class="scan-location-list">
-            <view 
-              class="scan-location-item" 
-              v-for="location in scanLocations" 
-              :key="location.value"
-              @tap="selectScanLocation(location)"
-            >
-              <text class="location-name">{{ location.label }}</text>
-              <text class="iconfont icon-right"></text>
-            </view>
-          </view>
+        <view class="plc-modal-body">
+          <text class="plc-placeholder">PLC控制页面，后续完善。</text>
         </view>
       </view>
     </view>
@@ -182,22 +167,16 @@
 </template>
 
 <script>
-import OrderCard from '@/components/order-card.vue'
-import request from '@/config/request'
 import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
 import PdaScan from '@/components/pda-scan.vue'
 
 export default {
   components: {
-    OrderCard,
     PdaScan
   },
   data() {
     return {
-      isRefreshing: false,
       username: '用户',
-      currentOrder: {},
-      queueGroups: [],
       statusBarHeight: 0,
       pageReady: false,
       // WebSocket相关数据
@@ -207,22 +186,13 @@ export default {
       },
       alarmLogs: [],
       showAlarmModal: false,
-      // 扫码相关数据
-      showScanModal: false,
-      // PDA 扫码弹窗
+      // 上货队列（前端模拟）
+      trayQueue: [],
+      _trayId: 0,
+      // 扫码
       showPdaScan: false,
-      selectedScanLocation: null,
-      scanLocations: [
-        { label: '一楼接货站台', value: '一楼接货站台' },
-        { label: '一楼上货区', value: '一楼上货区' },
-        { label: '二楼A接货', value: '二楼A接货' },
-        { label: '二楼B接货', value: '二楼B接货' },
-        { label: '三楼A接货', value: '三楼A接货' },
-        { label: '三楼B接货', value: '三楼B接货' },
-        { label: '下货扫码处', value: '下货扫码处' }
-      ],
-      // 无码上货模式
-      isNoCodeMode: false
+      // PLC控制
+      showPlcPage: false
     }
   },
   computed: {
@@ -236,7 +206,7 @@ export default {
     const systemInfo = uni.getSystemInfoSync()
     this.statusBarHeight = systemInfo.statusBarHeight
 	
-	// 从登录时保存的用户信息中读取用户名
+    // 从登录时保存的用户信息中读取用户名
 	try {
 	  const savedUsername = uni.getStorageSync('username')
 	  if (savedUsername) {
@@ -245,24 +215,6 @@ export default {
 	} catch (error) {
 	  console.error('读取用户信息失败:', error)
 	}
-    
-    // 无码上货模式开关默认关闭（不再从本地存储读取）
-    this.isNoCodeMode = false
-    // 同步更新本地存储
-    try {
-      uni.setStorageSync('noCodeMode', false)
-    } catch (error) {
-      console.error('更新无码模式状态失败:', error)
-    }
-    
-    // 加载初始数据，不显示提示
-    const hasOrder = await this.fetchOrderData(false)
-    if (hasOrder || this.isNoCodeMode) {
-      // 有订单或无码模式都显示队列
-      await this.getQueueData()
-    } else {
-      this.queueGroups = []
-    }
     
     // 初始化WebSocket连接
     this.initWebSocket()
@@ -278,98 +230,6 @@ export default {
     }
   },
   methods: {
-    async getQueueData() {
-      try {
-        const res = await request.post('/queue_info/queryQueueList')
-        if (res.code === '200' && Array.isArray(res.data)) {
-          this.processQueueData(res.data)
-        }
-      } catch (error) {
-        console.error('获取队列数据失败:', error)
-      }
-    },
-
-    // 队列名称映射函数（与PC端保持一致）
-    getQueueDisplayName(queueName) {
-      const mapping = {
-        // A1-G1 映射为 YR01A-YR07A
-        A1: 'YR01A',
-        B1: 'YR02A',
-        C1: 'YR03A',
-        D1: 'YR04A',
-        E1: 'YR05A',
-        F1: 'YR06A',
-        G1: 'YR07A',
-        // A2-G2 映射为 YR01B-YR07B
-        A2: 'YR01B',
-        B2: 'YR02B',
-        C2: 'YR03B',
-        D2: 'YR04B',
-        E2: 'YR05B',
-        F2: 'YR06B',
-        G2: 'YR07B',
-        // A3-G3 映射为 B-H
-        A3: 'B',
-        B3: 'C',
-        C3: 'D',
-        D3: 'E',
-        E3: 'F',
-        F3: 'G',
-        G3: 'H'
-      }
-      return mapping[queueName] || queueName
-    },
-    processQueueData(data) {
-      // 定义区域分组
-      const groups = {
-        '上货区域': ['上货区'],
-        '预热房区域1': ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1'],
-        '预热房区域2': ['A2', 'B2', 'C2', 'D2', 'E2', 'F2', 'G2'],
-        '灭菌区': ['A3', 'B3', 'C3', 'D3', 'E3', 'F3', 'G3'],
-        '下货区域': ['下货区']
-      }
-
-      // 初始化结果数组
-      const result = []
-      let globalIndex = 1
-
-      // 处理每个分组
-      for (const [groupTitle, areaNames] of Object.entries(groups)) {
-        const areas = []
-        
-        // 查找每个区域名称对应的数据
-        for (const areaName of areaNames) {
-          const areaData = data.find(item => item.queueName === areaName)
-          if (areaData) {
-            // 解析托盘信息
-            let trayInfo = []
-            try {
-              trayInfo = areaData.trayInfo ? JSON.parse(areaData.trayInfo) : []
-            } catch (e) {
-              console.error('解析托盘信息失败:', e)
-            }
-
-            areas.push({
-              id: globalIndex++,
-              name: areaData.queueName, // 保存原始名称用于查询
-              displayName: this.getQueueDisplayName(areaData.queueName), // 显示用的名称
-              palletCount: trayInfo.length,
-              queueId: areaData.id  // 使用接口返回的原始id
-            })
-          }
-        }
-
-        // 只添加有区域的分组
-        if (areas.length > 0) {
-          result.push({
-            title: groupTitle,
-            areas: areas
-          })
-        }
-      }
-
-      this.queueGroups = result
-    },
     handleLogout() {
 	  uni.showModal({
 		title: '确认退出',
@@ -391,110 +251,6 @@ export default {
 		}
 	  })
 	},
-    
-    // 获取订单数据
-    async fetchOrderData(showToast = true) {
-      try {
-        const res = await request.post('/order_info/getNowRunningOrder')
-        if (res.code === '200') {
-          if (res.data) {
-            this.currentOrder = { ...res.data }
-            if (showToast) {
-              uni.showToast({
-                title: '刷新成功',
-                icon: 'success'
-              })
-            }
-            return true
-          } else {
-            this.currentOrder = {}
-            if (showToast) {
-              uni.showToast({
-                title: '暂无运行订单数据',
-                icon: 'none'
-              })
-            }
-            return false
-          }
-        } else {
-          if (showToast) {
-            uni.showToast({
-              title: res.message || '获取数据失败',
-              icon: 'none'
-            })
-          }
-          return false
-        }
-      } catch (error) {
-        console.error('获取运行订单数据失败:', error)
-        if (showToast) {
-          uni.showToast({
-            title: '网络异常',
-            icon: 'error'
-          })
-        }
-        return false
-      }
-    },
-    
-    // 下拉刷新
-    async onRefresh() {
-      this.isRefreshing = true
-      // 下拉刷新时，沿用本地存储的无码模式状态
-      try {
-        const savedNoCodeMode = uni.getStorageSync('noCodeMode')
-        if (savedNoCodeMode !== null && savedNoCodeMode !== undefined) {
-          this.isNoCodeMode = savedNoCodeMode
-        }
-      } catch (error) {
-        console.error('读取无码模式状态失败:', error)
-      }
-      
-      const hasOrder = await this.fetchOrderData()
-      if (hasOrder || this.isNoCodeMode) {
-        await this.getQueueData()
-      } else {
-        this.queueGroups = []
-      }
-      this.isRefreshing = false
-    },
-    // 无码模式切换
-    handleNoCodeModeChange(e) {
-      this.isNoCodeMode = e.detail.value
-      // 保存到本地存储
-      try {
-        uni.setStorageSync('noCodeMode', this.isNoCodeMode)
-      } catch (error) {
-        console.error('保存无码模式状态失败:', error)
-      }
-      
-      // 切换模式时重新加载队列数据
-      if (this.isNoCodeMode) {
-        this.getQueueData()
-      } else {
-        // 如果不是无码模式且没有订单，清空队列
-        if (!this.currentOrder.id) {
-          this.queueGroups = []
-        }
-      }
-    },
-    
-    navigateToQueue(area) {
-      uni.showLoading({
-        title: '加载中...',
-        mask: true
-      })
-      
-      uni.navigateTo({
-        url: `/pages/queue/queue?queueId=${area.queueId}&name=${area.name}`,
-        success: () => {
-          uni.hideLoading()
-        },
-        fail: () => {
-          uni.hideLoading()
-        }
-      })
-    },
 
     // ============ WebSocket和报警日志相关方法 ============
     // 初始化WebSocket连接
@@ -659,114 +415,79 @@ export default {
       }
     },
 
-    // ============ 扫码相关方法 ============
-    // 显示扫码地点选择弹窗
-    showScanLocationModal() {
-      this.showScanModal = true;
+    // ============ 上货队列（前端模拟）============
+    formatTrayTime(timestamp) {
+      if (!timestamp) return '--';
+      const d = new Date(timestamp);
+      const h = d.getHours().toString().padStart(2, '0');
+      const m = d.getMinutes().toString().padStart(2, '0');
+      const s = d.getSeconds().toString().padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    },
+    addMockTray(trayCode) {
+      this._trayId += 1;
+      this.trayQueue.push({
+        id: this._trayId,
+        trayCode: trayCode || `TRAY-${this._trayId}`,
+        addTime: Date.now()
+      });
+    },
+    removeTray(item) {
+      this.trayQueue = this.trayQueue.filter(t => t.id !== item.id);
+      uni.showToast({ title: '已移除', icon: 'success', duration: 1000 });
     },
 
-    // 隐藏扫码地点选择弹窗
-    hideScanLocationModal() {
-      this.showScanModal = false;
-    },
-
-    // 选择扫码地点
-    async selectScanLocation(location) {
-      this.hideScanLocationModal();
-      
-      // 检查WebSocket连接状态
-      if (!this.wsStatus.isConnected) {
-        uni.showToast({
-          title: 'WebSocket未连接，请检查网络',
-          icon: 'none'
-        });
-        return;
-      }
-      // 保存地点并打开PDA扫码弹窗
-      this.selectedScanLocation = location;
+    // ============ 扫码相关（直接扫码，连接PC时发往电脑端）============
+    openScanDirect() {
       this.showPdaScan = true;
     },
-
-    // PDA 扫码弹窗回调
     onPdaClose() {
       this.showPdaScan = false;
     },
     onPdaConfirm(scanCode) {
       this.showPdaScan = false;
-      if (!this.selectedScanLocation || !scanCode) return;
-      
-      // 显示加载提示
-      uni.showLoading({
-        title: '处理中...',
-        mask: true
-      });
-      
-      const success = this.wsClient && this.wsClient.sendScanCode(this.selectedScanLocation.value, scanCode);
-      if (!success) {
-        uni.hideLoading();
-        uni.showToast({
-          title: '发送失败，请检查连接',
-          icon: 'none'
-        });
+      if (!scanCode) return;
+      // 已连接电脑端时：通过 WebSocket 发送到 PC 上货区
+      if (this.wsStatus.isConnected && this.wsClient) {
+        uni.showLoading({ title: '处理中...', mask: true });
+        const sent = this.wsClient.sendScanCode('上货区', scanCode);
+        if (!sent) {
+          uni.hideLoading();
+          uni.showToast({ title: '发送失败，请检查连接', icon: 'none' });
+          this.addMockTray(scanCode);
+        }
+        setTimeout(() => uni.hideLoading(), 10000);
         return;
       }
-      // 设置超时机制，10秒后自动隐藏loading
-      setTimeout(() => {
-        uni.hideLoading();
-      }, 10000);
+      // 未连接时：仅加入本地队列
+      this.addMockTray(scanCode);
+      uni.showToast({ title: '已加入上货队列', icon: 'success' });
     },
 
-    // 处理扫码响应
+    // ============ PLC控制 ============
+    showPlcModal() {
+      this.showPlcPage = true;
+    },
+    hidePlcModal() {
+      this.showPlcPage = false;
+    },
+
+    // 处理扫码响应（PC 端确认收到）
     onScanResponse(data) {
-      console.log('收到扫码响应:', data);
-      // 收到响应后立即隐藏loading，避免一直转圈
       uni.hideLoading();
-      
       if (!data.success) {
-        uni.showToast({
-          title: data.message || '扫码处理失败',
-          icon: 'none'
-        });
+        uni.showToast({ title: data.message || '扫码处理失败', icon: 'none' });
       }
     },
-
-    // 处理扫码结果
+    // 处理扫码结果（PC 端处理完成）
     onScanResult(data) {
-      console.log('收到扫码结果:', data);
-      // 扫码结果处理，loading已经在onScanResponse中隐藏了
-      
       if (data.success) {
-        uni.showToast({
-          title: '扫码成功',
-          icon: 'success'
-        });
-        
-        // 刷新托盘队列列表
-        this.refreshQueueData();
+        const trayCode = (data.data && data.data.trayCode) || '';
+        if (trayCode) this.addMockTray(trayCode);
+        uni.showToast({ title: '扫码成功，已同步到电脑端', icon: 'success' });
       } else {
-        uni.showToast({
-          title: data.message || '扫码处理失败',
-          icon: 'none'
-        });
+        uni.showToast({ title: data.message || '扫码处理失败', icon: 'none' });
       }
-    },
-
-    // 刷新托盘队列数据
-    async refreshQueueData() {
-      try {
-        await this.getQueueData();
-        // 移除队列刷新成功提示，避免过多提示信息
-      } catch (error) {
-        console.error('刷新队列数据失败:', error);
-      }
-    }
-  },
-
-  // 组件销毁前断开WebSocket连接
-  beforeDestroy() {
-    if (this.wsClient) {
-      this.wsClient.disconnect();
-      this.wsClient = null;
     }
   }
 }
@@ -823,153 +544,114 @@ export default {
   
   .content {
     padding: 30rpx;
-    padding-bottom: calc(env(safe-area-inset-bottom) + 120rpx);  // 适配底部安全区域和悬浮按钮
+    padding-bottom: calc(env(safe-area-inset-bottom) + 220rpx);
     
-    .section-title {
-      font-size: 32rpx;
-      color: #333;
-      font-weight: bold;
-      margin: 30rpx 0;
-    }
-    
-    .area-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 20rpx;
-      
-      .area-item {
-        background: #fff;
-        padding: 30rpx;
-        border-radius: $border-radius;
-        box-shadow: $card-shadow;
+    .queue-section {
+      .queue-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        transition: all 0.3s ease;
-        position: relative;
+        margin-bottom: 24rpx;
+        padding: 0 8rpx;
+        .queue-title {
+          font-size: 32rpx;
+          font-weight: 600;
+          color: #1f2937;
+        }
+        .header-right {
+          display: flex;
+          align-items: center;
+        }
+        .queue-count {
+          font-size: 24rpx;
+          color: #6b7280;
+          background: rgba(107, 114, 128, 0.08);
+          padding: 6rpx 16rpx;
+          border-radius: 20rpx;
+        }
+      }
+      .queue-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 60rpx 30rpx;
+        .empty-icon {
+          font-size: 80rpx;
+          margin-bottom: 16rpx;
+        }
+        .empty-text {
+          font-size: 28rpx;
+          color: #999;
+        }
+      }
+      .pallet-list {
+        display: flex;
+        flex-direction: column;
+      }
+      .pallet-card {
+        background: #ffffff;
+        border-radius: 16rpx;
         overflow: hidden;
-        
-        &::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 6rpx;
-          height: 100%;
-          background: linear-gradient(to bottom, #1a2a6c, #b21f1f);
-          opacity: 0.8;
-        }
-        
-        &:active {
-          transform: scale(0.98);
-          box-shadow: $hover-shadow;
-        }
-        
-        .area-content {
-          flex: 1;
-          margin-left: 20rpx;
-          
-          .area-name {
-            font-size: 32rpx;
-            color: $text-primary;
-            font-weight: bold;
-            margin-bottom: 8rpx;
-            display: block;
-          }
-          
-          .pallet-count {
+        box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
+        margin-bottom: 30rpx;
+        position: relative;
+        .card-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 20rpx 24rpx;
+          background: #f9fafb;
+          border-bottom: 1px solid #f3f4f6;
+          .position-badge {
+            background: #2563eb;
+            color: #fff;
             font-size: 26rpx;
-            color: $text-secondary;
+            font-weight: 500;
+            padding: 6rpx 16rpx;
+            border-radius: 8rpx;
+          }
+          .header-right {
             display: flex;
             align-items: center;
-            
-            &::before {
-              content: '';
-              width: 6rpx;
-              height: 6rpx;
-              background: #1a2a6c;
-              border-radius: 50%;
-              margin-right: 8rpx;
+            gap: 12rpx;
+          }
+          .remove-tray-btn {
+            background: #ef4444;
+            color: #fff;
+            padding: 6rpx 16rpx;
+            border-radius: 6rpx;
+            font-size: 24rpx;
+            font-weight: 500;
+            &:active {
+              background: #dc2626;
             }
           }
         }
-        
-        .area-decoration {
-          text-align: right;
-          
-          .area-id {
-            font-size: 40rpx;
-            font-weight: bold;
-            color: rgba(26, 42, 108, 0.1);
-            display: block;
+        .card-content {
+          padding: 20rpx 24rpx;
+          display: flex;
+          .left-section {
+            flex: 1;
           }
-          
-          .iconfont {
-            font-size: 32rpx;
-            color: $text-secondary;
-            margin-top: 8rpx;
+          .info-item {
+            display: flex;
+            margin-bottom: 16rpx;
+            &:last-child {
+              margin-bottom: 0;
+            }
+            .info-label {
+              flex: 0 0 140rpx;
+              font-size: 26rpx;
+              color: #6b7280;
+            }
+            .info-value {
+              flex: 1;
+              font-size: 28rpx;
+              color: #1f2937;
+              font-weight: 500;
+            }
           }
         }
-      }
-    }
-  }
-  
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 100rpx 0;
-    
-    .iconfont {
-      font-size: 120rpx;
-      color: #ccc;
-      margin-bottom: 20rpx;
-    }
-    
-    .empty-text {
-      font-size: 32rpx;
-      color: #999;
-    }
-  }
-  
-  .no-order-section {
-    background: #fff;
-    padding: 40rpx 30rpx;
-    border-radius: $border-radius;
-    margin-bottom: 30rpx;
-    box-shadow: $card-shadow;
-    
-    .no-order-tip {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      margin-bottom: 30rpx;
-      
-      .iconfont {
-        font-size: 120rpx;
-        color: #ccc;
-        margin-bottom: 20rpx;
-      }
-      
-      .empty-text {
-        font-size: 32rpx;
-        color: #999;
-      }
-    }
-    
-    .no-code-toggle {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 20rpx;
-      background: #f8f9fa;
-      border-radius: 12rpx;
-      
-      .toggle-label {
-        font-size: 28rpx;
-        color: #333;
-        font-weight: 500;
       }
     }
   }
@@ -1021,7 +703,16 @@ export default {
   }
 }
 
-/* 报警悬浮按钮 */
+/* PLC控制悬浮按钮 */
+.fab-btn.plc-fab {
+  bottom: 280rpx;
+  background: #10b981 !important;
+  &:active {
+    background: #059669 !important;
+  }
+}
+
+/* 报警悬浮按钮（最下） */
 .alarm-fab {
   bottom: 140rpx;
   background-color: #f59e0b;
@@ -1064,9 +755,9 @@ export default {
   }
 }
 
-/* 扫码悬浮按钮 */
+/* 扫码悬浮按钮（最上/前面） */
 .fab-btn.scan-fab {
-  bottom: 280rpx;
+  bottom: 420rpx;
   background: #3b82f6 !important;
 
   &:active {
@@ -1318,7 +1009,53 @@ export default {
   }
 }
 
-// 扫码弹窗样式
+// PLC控制弹窗
+.plc-modal-content {
+  width: 90%;
+  max-width: 600rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  overflow: hidden;
+  box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+}
+.plc-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24rpx;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  .plc-modal-title {
+    font-size: 32rpx;
+    font-weight: 600;
+    color: #1f2937;
+  }
+  .plc-close-btn {
+    width: 60rpx;
+    height: 60rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: #e5e7eb;
+    .close-text { font-size: 40rpx; color: #6b7280; }
+  }
+}
+.plc-modal-body {
+  padding: 80rpx 40rpx;
+  min-height: 200rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  .plc-placeholder {
+    font-size: 28rpx;
+    color: #6b7280;
+  }
+}
+
+// 扫码弹窗样式（保留供 pda-scan 等使用）
 .scan-modal-content {
   width: 90%;
   max-width: 600rpx;

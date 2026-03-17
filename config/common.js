@@ -4,7 +4,7 @@ const serverConfig = {
   ip: {
     // development: '192.168.1.14',  // 开发环境IP
 	// development: '127.0.0.1',  // 开发环境IP
-	development: '10.68.11.136',  // 公司开发环境IP
+	  development: '192.168.31.173',  // 公司开发环境IP
     production: '192.168.0.140'    // 生产环境IP
   },
   
