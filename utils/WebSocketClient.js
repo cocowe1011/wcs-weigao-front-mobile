@@ -18,6 +18,7 @@ class AlarmWebSocketClient {
     this.onError = config.onError || null;
     this.onScanResponse = config.onScanResponse || null;
     this.onScanResult = config.onScanResult || null;
+    this.onPlcWriteResponse = config.onPlcWriteResponse || null;
     
     this.alarmLogs = []; // 存储接收到的报警日志
   }
@@ -136,6 +137,11 @@ class AlarmWebSocketClient {
         this.handleScanResult(data);
         break;
         
+      case 'plc_write_response':
+        // 处理 PLC 写入响应
+        this.handlePlcWriteResponse(data);
+        break;
+        
       case 'pong':
         // 心跳响应
         break;
@@ -187,6 +193,14 @@ class AlarmWebSocketClient {
     }
   }
 
+  // 处理 PLC 写入响应
+  handlePlcWriteResponse(data) {
+    console.log('收到 PLC 写入响应:', data);
+    if (this.onPlcWriteResponse) {
+      this.onPlcWriteResponse(data);
+    }
+  }
+
   // 发送扫码消息
   sendScanCode(location, trayCode) {
     const message = {
@@ -203,6 +217,36 @@ class AlarmWebSocketClient {
   sendTrayDataChanged() {
     const message = {
       type: 'tray_data_changed',
+      timestamp: new Date().toISOString()
+    };
+    
+    return this.send(message);
+  }
+
+  /**
+   * 发送 PLC 写入命令到 PC 端
+   * @param {string} address - PLC 地址（如 'W_DBW44'）
+   * @param {number|boolean} value - 写入的值（1/0 或 true/false）
+   */
+  sendPlcWrite(address, value) {
+    const message = {
+      type: 'plc_write',
+      address: address,
+      value: value,
+      timestamp: new Date().toISOString()
+    };
+    
+    return this.send(message);
+  }
+
+  /**
+   * 发送 PLC 取消写入命令到 PC 端
+   * @param {string} address - 要取消的 PLC 地址（如 'W_DBW30'）
+   */
+  sendPlcCancelWrite(address) {
+    const message = {
+      type: 'plc_cancel_write',
+      address: address,
       timestamp: new Date().toISOString()
     };
     

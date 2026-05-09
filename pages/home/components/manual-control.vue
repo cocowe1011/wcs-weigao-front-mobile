@@ -189,8 +189,32 @@
 </template>
 
 <script>
+// PLC 写入地址常量（对应 DB1001 数据块）
+const PLC_ADDRESSES = {
+  MODE_TOGGLE: 'W_DBW34',      // 手自动切换
+  MOTOR_CODE_1: 'W_DBW36',     // 选定电机编号1
+  MOTOR_CODE_2: 'W_DBW38',     // 选定电机编号2
+  MOTOR_CODE_3: 'W_DBW40',     // 选定电机编号3
+  MOTOR_CODE_4: 'W_DBW42',     // 选定电机编号4
+  MOTOR_FORWARD: 'W_DBW44',    // 电机前进
+  MOTOR_BACKWARD: 'W_DBW46',   // 电机后退
+  LIFT_UP: 'W_DBW48',          // 顶升上升
+  LIFT_DOWN: 'W_DBW50',        // 顶升下降
+  CART_LEFT: 'W_DBW52',        // 小车左移
+  CART_RIGHT: 'W_DBW54'        // 小车右移
+}
+
+// 电机编号1-4对应的PLC地址
+const MOTOR_CODE_ADDRESSES = [
+  PLC_ADDRESSES.MOTOR_CODE_1,
+  PLC_ADDRESSES.MOTOR_CODE_2,
+  PLC_ADDRESSES.MOTOR_CODE_3,
+  PLC_ADDRESSES.MOTOR_CODE_4
+]
+
 export default {
   name: 'ManualControl',
+  inject: ['provideWsClient', 'provideWsConnected'],
   data() {
     return {
       isManual: true,
@@ -211,8 +235,30 @@ export default {
     }
   },
   methods: {
+    // 发送 PLC 写入命令（复用 home.vue 的 WebSocket 连接）
+    sendPlcCommand(address, value) {
+      const wsClient = this.provideWsClient()
+      const wsConnected = this.provideWsConnected()
+      if (!wsClient || !wsConnected) {
+        uni.showToast({
+          title: '未连接到服务器',
+          icon: 'none',
+          duration: 1500
+        })
+        return false
+      }
+      return wsClient.sendPlcWrite(address, value)
+    },
+
     toggleMode() {
-      this.isManual = !this.isManual
+      const newMode = !this.isManual
+      
+      // 发送模式切换命令到 PLC
+      // 02 表示手动模式
+      const modeValue = newMode ? 2 : 1
+      this.sendPlcCommand(PLC_ADDRESSES.MODE_TOGGLE, modeValue)
+      
+      this.isManual = newMode
       uni.showToast({
         title: this.isManual ? '已切换为手动模式' : '已切换为自动模式',
         icon: 'none',
@@ -220,14 +266,65 @@ export default {
       })
     },
     toggleMotor(idx) {
-      this.motors[idx].selected = !this.motors[idx].selected
+      const motor = this.motors[idx]
+      motor.selected = !motor.selected
+      
+      const address = MOTOR_CODE_ADDRESSES[idx]
+      if (motor.selected) {
+        // 选中：将电机编号写入PLC
+        if (motor.code) {
+          this.sendPlcCommand(address, parseInt(motor.code, 10))
+        } else {
+          // 没填编号就选中，提示用户
+          motor.selected = false
+          uni.showToast({
+            title: '请先输入电机编号',
+            icon: 'none',
+            duration: 1500
+          })
+        }
+      } else {
+        // 取消选中：写入0清空
+        this.sendPlcCommand(address, 0)
+      }
     },
     onPressStart(key) {
       if (!this.isManual) return
       this.pressState[key] = true
+      
+      // 发送 PLC 命令：按下写 1
+      const addressMap = {
+        motorForward: PLC_ADDRESSES.MOTOR_FORWARD,
+        motorBackward: PLC_ADDRESSES.MOTOR_BACKWARD,
+        liftUp: PLC_ADDRESSES.LIFT_UP,
+        liftDown: PLC_ADDRESSES.LIFT_DOWN,
+        cartLeft: PLC_ADDRESSES.CART_LEFT,
+        cartRight: PLC_ADDRESSES.CART_RIGHT
+      }
+      
+      const address = addressMap[key]
+      if (address) {
+        this.sendPlcCommand(address, 1)
+        uni.vibrateShort({ type: 'medium' })
+      }
     },
     onPressEnd(key) {
       this.pressState[key] = false
+      
+      // 发送 PLC 命令：松开写 0
+      const addressMap = {
+        motorForward: PLC_ADDRESSES.MOTOR_FORWARD,
+        motorBackward: PLC_ADDRESSES.MOTOR_BACKWARD,
+        liftUp: PLC_ADDRESSES.LIFT_UP,
+        liftDown: PLC_ADDRESSES.LIFT_DOWN,
+        cartLeft: PLC_ADDRESSES.CART_LEFT,
+        cartRight: PLC_ADDRESSES.CART_RIGHT
+      }
+      
+      const address = addressMap[key]
+      if (address) {
+        this.sendPlcCommand(address, 0)
+      }
     }
   }
 }

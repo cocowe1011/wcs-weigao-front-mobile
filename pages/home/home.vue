@@ -141,6 +141,13 @@ import AlarmWebSocketClient from '@/utils/WebSocketClient.js'
 
 export default {
   components: { OrderSettings, ScanRecheck, InfoEdit, ManualControl },
+  // 向子组件提供 WebSocket 客户端，避免每个子组件各自建连接
+  provide() {
+    return {
+      provideWsClient: () => this.wsClient,
+      provideWsConnected: () => this.wsStatus.isConnected
+    }
+  },
   data() {
     return {
       statusBarHeight: 0,
@@ -202,6 +209,7 @@ export default {
         onConnected: this.onWebSocketConnected,
         onDisconnected: this.onWebSocketDisconnected,
         onAlarmReceived: this.onAlarmReceived,
+        onPlcWriteResponse: this.onPlcWriteResponse,
         onError: this.onWebSocketError
       })
       this.wsClient.connect()
@@ -226,6 +234,16 @@ export default {
     onWebSocketError(error) {
       console.error('WebSocket错误:', error)
       this.wsStatus.isConnected = false
+    },
+
+    onPlcWriteResponse(data) {
+      if (!data.success) {
+        uni.showToast({
+          title: data.message || 'PLC 写入失败',
+          icon: 'none',
+          duration: 1500
+        })
+      }
     },
 
     toggleAlarmModal() {
