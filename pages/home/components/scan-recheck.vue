@@ -122,6 +122,7 @@ import request from '@/config/request.js'
 export default {
   name: 'ScanRecheck',
   components: { PdaScan },
+  inject: ['provideWsClient', 'provideWsConnected'],
   data() {
     return {
       pageReady: false,
@@ -130,7 +131,7 @@ export default {
       sendingCmd: false,
       showPdaScan: false,
       currentBatch: null,
-      currentPallet: null,  // 当前最新的未完全扫码托盘（trayStatus=0或1）
+      currentPallet: null,  // 当前最新的999异常托盘
       currentDestination: null
     }
   },
@@ -181,12 +182,11 @@ export default {
         const destRes = await request.get('/produce_batch_destination/current', { batchId })
         this.currentDestination = (destRes && destRes.code === '200' && destRes.data) ? destRes.data : null
 
-        // 3. 单独查托盘列表，找最新一个异常托盘（已上货且未全扫）
+        // 3. 查最新一个999异常托盘（sendDestinationCode='999'）
         const palletRes = await request.get('/produce_pallet/listByBatchId', { batchId })
         if (palletRes && palletRes.code === '200' && palletRes.data) {
           const pallets = palletRes.data
-          // 找第一个 load_status=1（已上货）且 trayStatus != 2（未全扫）
-          const abnormal = pallets.find(p => p.loadStatus === '1' && p.trayStatus !== '2')
+          const abnormal = pallets.find(p => '999' === p.sendDestinationCode)
           this.currentPallet = abnormal || null
         }
       } catch (e) {
@@ -269,6 +269,24 @@ export default {
 
     // ============ 下发通行命令 ============
 
+    // 发送 PLC 写入命令（复用 home.vue 的 WebSocket 连接）
+    sendPlcCommand(address, value) {
+      const wsClient = this.provideWsClient()
+      const wsConnected = this.provideWsConnected()
+      if (!wsClient || !wsConnected) {
+        uni.showToast({ title: '未连接到服务器', icon: 'none', duration: 1500 })
+        return false
+      }
+      return wsClient.sendPlcWrite(address, value)
+    },
+
+    // 发送 PLC 取消写入命令
+    sendPlcCancelWrite(address) {
+      const wsClient = this.provideWsClient()
+      if (!wsClient) return false
+      return wsClient.sendPlcCancelWrite(address)
+    },
+
     async handleSendCommand() {
       if (!this.canSendCmd) return
       uni.showModal({
@@ -280,15 +298,39 @@ export default {
           if (!modal.confirm) return
           this.sendingCmd = true
           try {
-            const res = await request.post('/produce_pallet/sendDestination', {
+            // 1. 调后端重新发送目的地（999→正确目的地+1/2后缀）
+            const res = await request.post('/produce_pallet/resendDestination', {
               palletId: String(this.currentPallet.id),
               virtualId: this.currentPallet.virtualId,
               destinationCode: this.currentDestination.destinationCode
             })
-            if (res && res.code === '200') {
+            if (res && res.code === '200' && res.data) {
               const updated = res.data
-              const trayStatusText = { '0': '未扫描', '1': '部分扫描完成', '2': '全部扫描完成' }[updated.trayStatus] || '—'
+              const destValue = parseInt(updated.sendDestinationCode, 10)
+
+              // 2. 写PLC：DB1001.DBW24=1006，DB1001.DBW26=目的地值，DB1001.DBW182=1，持续2秒后取消
+              const writtenAddresses = []
+              this.sendPlcCommand('W_DBW24', 1006)
+              writtenAddresses.push('W_DBW24')
+              this.sendPlcCommand('W_DBW26', destValue)
+              writtenAddresses.push('W_DBW26')
+              this.sendPlcCommand('W_DBW182', 1)
+              writtenAddresses.push('W_DBW182')
+              setTimeout(() => {
+                writtenAddresses.forEach(addr => {
+                  this.sendPlcCancelWrite(addr)
+                })
+              }, 2000)
+
               uni.showToast({ title: `通行命令已下发：${updated.sendDestinationCode}`, icon: 'success', duration: 2000 })
+              // 通知PC端托盘数据变更（带上palletId和新目的地编码）
+              const wsClient = this.provideWsClient()
+              if (wsClient) {
+                wsClient.sendTrayDataChanged({
+                  palletId: String(updated.id),
+                  sendDestinationCode: updated.sendDestinationCode
+                })
+              }
               // 刷新拿到下一个异常托盘
               await this.loadData()
             } else {

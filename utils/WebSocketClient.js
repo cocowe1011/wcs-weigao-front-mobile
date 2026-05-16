@@ -213,11 +213,12 @@ class AlarmWebSocketClient {
     return this.send(message);
   }
 
-  // 发送托盘数据变更通知（PC端收到后重新加载数据）
-  sendTrayDataChanged() {
+  // 发送托盘数据变更通知（PC端收到后更新队列中对应托盘状态）
+  sendTrayDataChanged(data) {
     const message = {
       type: 'tray_data_changed',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      data: data || {}
     };
     
     return this.send(message);
