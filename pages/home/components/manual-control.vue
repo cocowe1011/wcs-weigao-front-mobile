@@ -345,7 +345,8 @@ export default {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 20rpx 24rpx calc(env(safe-area-inset-bottom) + 16rpx);
+  padding: 20rpx;
+  padding-bottom: 16rpx;
   overflow: hidden;
 }
 
@@ -375,7 +376,8 @@ export default {
   display: flex;
   align-items: center;
   margin-bottom: 12rpx;
-  padding: 0 4rpx;
+  padding-left: 4rpx;
+  padding-right: 4rpx;
 }
 
 .section-dot {

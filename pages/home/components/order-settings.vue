@@ -545,14 +545,15 @@ export default {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 24rpx 24rpx calc(env(safe-area-inset-bottom) + 24rpx);
+  padding: 24rpx;
+  padding-bottom: 24rpx;
   /* 不用 gap：部分 Android WebView 对 flex gap 支持差，改用 margin */
   transition: opacity 0.3s ease;
   overflow: hidden;
+}
 
-  > .section:not(:last-child) {
-    margin-bottom: 24rpx;
-  }
+.page-layout > .section:not(:last-child) {
+  margin-bottom: 24rpx;
 }
 
 /* ---- 区域公共样式 ---- */
@@ -582,7 +583,8 @@ export default {
   display: flex;
   align-items: center;
   margin-bottom: 16rpx;
-  padding: 0 4rpx;
+  padding-left: 4rpx;
+  padding-right: 4rpx;
   flex-shrink: 0;
 }
 
@@ -738,10 +740,10 @@ export default {
   padding: 12rpx 20rpx 20rpx;
   display: flex;
   flex-direction: column;
+}
 
-  > .pallet-block + .pallet-block {
-    margin-top: 20rpx;
-  }
+.pallet-list .pallet-block + .pallet-block {
+  margin-top: 20rpx;
 }
 
 .pallet-block {
@@ -763,10 +765,10 @@ export default {
   padding: 12rpx 16rpx 10rpx;
   background: rgba(255, 255, 255, 0.4);
   border-bottom: 1rpx solid rgba(255, 255, 255, 0.65);
+}
 
-  > * + * {
-    margin-left: 12rpx;
-  }
+.pallet-index-badge {
+  margin-right: 12rpx;
 }
 
 .pallet-index-badge {
@@ -904,13 +906,13 @@ export default {
 .action-btn-row {
   display: flex;
   padding: 20rpx 28rpx;
-
-  > .action-btn + .action-btn {
-    margin-left: 16rpx;
-  }
   background: #fff;
   border-top: 1rpx solid #f3f4f6;
   flex-shrink: 0;
+}
+
+.action-btn-row .action-btn + .action-btn {
+  margin-left: 16rpx;
 }
 
 .action-btn {

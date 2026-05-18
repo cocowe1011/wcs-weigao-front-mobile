@@ -362,13 +362,14 @@ export default {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 24rpx 24rpx calc(env(safe-area-inset-bottom) + 24rpx);
+  padding: 24rpx;
+  padding-bottom: 24rpx;
   transition: opacity 0.3s ease;
   overflow: hidden;
+}
 
-  > .section:not(:last-child) {
-    margin-bottom: 24rpx;
-  }
+.page-layout > .section:not(:last-child) {
+  margin-bottom: 24rpx;
 }
 
 /* ---- 区域公共 ---- */
@@ -395,7 +396,8 @@ export default {
   display: flex;
   align-items: center;
   margin-bottom: 16rpx;
-  padding: 0 4rpx;
+  padding-left: 4rpx;
+  padding-right: 4rpx;
   flex-shrink: 0;
 }
 
@@ -585,10 +587,10 @@ export default {
   padding: 12rpx 20rpx 20rpx;
   display: flex;
   flex-direction: column;
+}
 
-  > .goods-item + .goods-item {
-    margin-top: 16rpx;
-  }
+.goods-list .goods-item + .goods-item {
+  margin-top: 16rpx;
 }
 
 .goods-item {

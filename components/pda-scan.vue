@@ -4,7 +4,7 @@
       <!-- 扫码区域 -->
       <view class="scan-area">
         <view class="scan-icon-wrapper">
-          <text class="scan-icon">📷</text>
+          <uni-icons type="scan" size="60" color="#1a2a6c"></uni-icons>
         </view>
         <view class="scan-title">请按击侧面扫码按钮进行扫描</view>
         <view class="scan-subtitle">等待扫码中...</view>
@@ -64,7 +64,7 @@ export default {
     this.stopScan();
   },
   methods: {
-    // 初始化海康PDA扫码
+    // 初始化PDA扫码（同时支持海康 + 东集技术）
     initScan() {
       // #ifdef APP-PLUS
       try {
@@ -72,19 +72,25 @@ export default {
         let IntentFilter = plus.android.importClass('android.content.IntentFilter');
         this.filter = new IntentFilter();
         this.filter.addAction("com.service.scanner.data"); // 海康PDA广播动作
+        this.filter.addAction("com.seuic.scan"); // 东集技术PDA广播动作
+        this.filter.addAction("com.android.server.scannerservice.broadcast"); // 东集技术PDA广播动作（兼容旧版）
+        this.filter.addAction("com.android.server.aa"); // 东集技术PDA广播动作（兼容旧版）
         
         const that = this;
         this.receiver = plus.android.implements('io.dcloud.feature.internal.reflect.BroadcastReceiver', {
           onReceive: function (context, intent) {
             plus.android.importClass(intent);
             let code = intent.getStringExtra("ScanCode"); // 海康PDA的广播标签
-            console.log("海康PDA扫码结果:", code);
+            if (!code) {
+              code = intent.getStringExtra("scannerdata"); // 东集技术PDA的广播标签
+            }
+            console.log("PDA扫码结果:", code);
             that.queryCode(code);
           }
         });
-        console.log("海康PDA扫码初始化成功");
+        console.log("PDA扫码初始化成功（海康 + 东集技术）");
       } catch (error) {
-        console.error("海康PDA扫码初始化失败:", error);
+        console.error("PDA扫码初始化失败:", error);
       }
       // #endif
     },
@@ -206,11 +212,6 @@ export default {
   
   .scan-icon-wrapper {
     margin-bottom: 24rpx;
-    
-    .scan-icon {
-      font-size: 120rpx;
-      display: block;
-    }
   }
   
   .scan-title {

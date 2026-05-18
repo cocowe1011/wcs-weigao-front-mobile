@@ -331,10 +331,10 @@ export default {
   .header-actions {
     display: flex;
     align-items: center;
+  }
 
-    > * + * {
-      margin-left: 24rpx;
-    }
+  .alarm-bell {
+    margin-right: 24rpx;
   }
 
   .alarm-bell {
@@ -499,10 +499,10 @@ export default {
   .alarm-actions {
     display: flex;
     align-items: center;
+  }
 
-    > .alarm-refresh-btn {
-      margin-left: 12rpx;
-    }
+  .connection-status {
+    margin-right: 12rpx;
   }
 
   .connection-status {
@@ -613,10 +613,10 @@ export default {
 
   .alarm-footer-actions {
     display: flex;
+  }
 
-    > .alarm-btn + .alarm-btn {
-      margin-left: 12rpx;
-    }
+  .alarm-btn + .alarm-btn {
+    margin-left: 12rpx;
   }
 
   .alarm-btn {
