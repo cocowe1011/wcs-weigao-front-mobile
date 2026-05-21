@@ -277,42 +277,42 @@ export default {
 .action-buttons {
   display: flex;
   padding: 24rpx 40rpx 40rpx;
-  gap: 16rpx;
   background: #ffffff;
-  
-  .action-btn {
-    flex: 1;
-    text-align: center;
-    padding: 24rpx 0;
-    font-size: 30rpx;
-    font-weight: 500;
-    border-radius: 12rpx;
-    transition: all 0.2s;
-    
-    &.cancel-btn {
-      background: #f3f4f6;
-      color: #4b5563;
-      
-      &:active {
-        background: #e5e7eb;
-      }
-    }
-    
-    &.confirm-btn {
-      background: #2563eb;
-      color: #ffffff;
-      
-      &:active {
-        background: #1d4ed8;
-      }
-      
-      &.disabled {
-        background: #93c5fd;
-        color: #e0e7ff;
-        opacity: 0.6;
-      }
-    }
-  }
+}
+
+.action-btn {
+  flex: 1;
+  text-align: center;
+  padding: 24rpx 0;
+  font-size: 30rpx;
+  font-weight: 500;
+  border-radius: 12rpx;
+  transition: all 0.2s;
+}
+
+.cancel-btn {
+  background: #f3f4f6;
+  color: #4b5563;
+  margin-right: 16rpx;
+}
+
+.cancel-btn:active {
+  background: #e5e7eb;
+}
+
+.confirm-btn {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.confirm-btn:active {
+  background: #1d4ed8;
+}
+
+.confirm-btn.disabled {
+  background: #93c5fd;
+  color: #e0e7ff;
+  opacity: 0.6;
 }
 </style>
 
