@@ -34,6 +34,15 @@
         <view class="section-header">
           <view class="section-dot dot-green"></view>
           <text class="section-title">MSE信息</text>
+          <button
+            v-if="currentBatch"
+            class="add-pallet-btn"
+            size="mini"
+            type="primary"
+            :disabled="addingPallet"
+            @tap="handleAddPallet"
+          >{{ addingPallet ? '添加中…' : '+ 添加托盘' }}</button>
+          <view class="header-spacer"></view>
           <view
             class="refresh-btn"
             :class="{ 'btn-loading': refreshing }"
@@ -66,10 +75,19 @@
                 <view class="pallet-header">
                   <view class="pallet-index-badge">{{ pIndex + 1 }}</view>
                   <text class="pallet-no">托盘 {{ pallet.palletNo || ('P' + (pIndex + 1)) }}</text>
+                  <button
+                    class="add-goods-btn"
+                    size="mini"
+                    type="primary"
+                    plain
+                    :disabled="addGoodsPalletId === pallet.id"
+                    @tap="handleAddGoodsBtnTap(pallet)"
+                  >+ 扫码添加箱子</button>
+                  <view class="pallet-header-spacer"></view>
                   <view class="pallet-status-badge" :class="'pstatus-' + pallet.trayStatus">
                     {{ { '0': '待扫', '1': '部分扫', '2': '已完成' }[pallet.trayStatus] || '待扫' }}
                   </view>
-                  <view class="goods-count-badge" style="margin-left:auto;">{{ (pallet.goods || []).length }} 件</view>
+                  <view class="goods-count-badge">{{ (pallet.goods || []).length }} 件</view>
                 </view>
 
                 <!-- 货物：横向小卡片（紧凑三行：品名 / 规格 / UID） -->
@@ -164,11 +182,18 @@
 
     </view>
 
-    <!-- PDA 扫码组件 -->
+    <!-- PDA 扫码组件（来货查询用） -->
     <pda-scan
       :visible="showPdaScan"
       @close="onPdaClose"
       @confirm="onPdaConfirm"
+    />
+
+    <!-- PDA 扫码组件（添加箱子用） -->
+    <pda-scan
+      :visible="showAddGoodsScan"
+      @close="onAddGoodsPdaClose"
+      @confirm="onAddGoodsPdaConfirm"
     />
   </view>
 </template>
@@ -200,7 +225,11 @@ export default {
       // 扫码弹窗
       showPdaScan: false,
       // 刷新状态
-      refreshing: false
+      refreshing: false,
+      // 添加托盘/箱子
+      addingPallet: false,
+      addGoodsPalletId: null,
+      showAddGoodsScan: false
     }
   },
   computed: {
@@ -328,12 +357,12 @@ export default {
     onPdaConfirm(scanCode) {
       this.showPdaScan = false
       if (!scanCode) return
-      this.barcodeInput = scanCode
+      this.barcodeInput = this.cleanBarcode(scanCode)
       this.doQuery()
     },
 
     async doQuery() {
-      const uid = this.barcodeInput.trim()
+      const uid = this.cleanBarcode(this.barcodeInput)
       if (!uid) {
         uni.showToast({ title: '请输入条码', icon: 'none' })
         return
@@ -356,27 +385,15 @@ export default {
     },
 
     async createMockBatch(uid) {
-      const template = { productName: '一次性口罩', spec: '1000个/箱', remark: '' }
-      const palletCount = 5
-      const goodsPerPallet = 5
-      const totalGoods = palletCount * goodsPerPallet
-      const allGoods = [{ ...template, uid }]
-      for (let i = 0; i < totalGoods - 1; i++) {
-        allGoods.push({ ...template, uid: this.generateUid() })
-      }
-      const pallets = []
-      for (let p = 0; p < palletCount; p++) {
-        const start = p * goodsPerPallet
-        const end = start + goodsPerPallet
-        pallets.push({
-          palletNo: `TP-${String(p + 1).padStart(2, '0')}`,
-          trayStatus: '0',
-          goods: allGoods.slice(start, end)
-        })
-      }
       const dto = {
         batch: { batchNo: String(Date.now()), status: '0' },
-        pallets
+        pallets: [
+          {
+            palletNo: 'TP-01',
+            trayStatus: '0',
+            goods: [{ productName: '一次性口罩', spec: '1000个/箱', remark: '', uid }]
+          }
+        ]
       }
       try {
         const saveRes = await request.post('/produce_batch/save', dto)
@@ -451,6 +468,82 @@ export default {
       const ts = Date.now().toString(36).toUpperCase()
       const rand = Math.random().toString(36).substr(2, 8).toUpperCase()
       return `UID-${ts}-${rand}`
+    },
+
+    cleanBarcode(code) {
+      if (!code) return ''
+      return String(code).replace(/[^a-zA-Z0-9]/g, '').trim()
+    },
+
+    // ============ 添加托盘 / 添加箱子 ============
+
+    async handleAddPallet() {
+      if (!this.currentBatch || !this.currentBatch.batch || this.addingPallet) return
+      this.addingPallet = true
+      try {
+        const ret = await request.post('/produce_batch/addPallet', {
+          batchId: this.currentBatch.batch.id
+        })
+        if (ret && ret.code === '200' && ret.data) {
+          // 将新托盘追加到当前批次
+          if (!this.currentBatch.pallets) {
+            this.$set(this.currentBatch, 'pallets', [])
+          }
+          this.currentBatch.pallets.push(ret.data)
+          uni.showToast({ title: '已添加空托盘', icon: 'success', duration: 1500 })
+        } else {
+          uni.showToast({ title: ret?.message || '添加托盘失败', icon: 'none' })
+        }
+      } catch (e) {
+        console.error('添加托盘失败:', e)
+        uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+      } finally {
+        this.addingPallet = false
+      }
+    },
+
+    handleAddGoodsBtnTap(pallet) {
+      if (!pallet || !pallet.id) return
+      this.addGoodsPalletId = pallet.id
+      this.showAddGoodsScan = true
+    },
+
+    onAddGoodsPdaClose() {
+      this.showAddGoodsScan = false
+      this.addGoodsPalletId = null
+    },
+
+    async onAddGoodsPdaConfirm(scanCode) {
+      this.showAddGoodsScan = false
+      const palletId = this.addGoodsPalletId
+      this.addGoodsPalletId = null
+      const uid = this.cleanBarcode(scanCode)
+      if (!uid || !palletId) return
+      if (!this.currentBatch || !this.currentBatch.batch) return
+
+      try {
+        const ret = await request.post('/produce_batch/addGoods', {
+          batchId: String(this.currentBatch.batch.id),
+          palletId: String(palletId),
+          uid: uid
+        })
+        if (ret && ret.code === '200' && ret.data) {
+          // 找到对应托盘，将新货物追加进去
+          const pallet = this.currentBatch.pallets.find(p => String(p.id) === String(palletId))
+          if (pallet) {
+            if (!pallet.goods) {
+              this.$set(pallet, 'goods', [])
+            }
+            pallet.goods.push(ret.data)
+          }
+          uni.showToast({ title: '已添加箱子', icon: 'success', duration: 1500 })
+        } else {
+          uni.showToast({ title: ret?.message || '添加箱子失败', icon: 'none', duration: 2000 })
+        }
+      } catch (e) {
+        console.error('添加箱子失败:', e)
+        uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+      }
     },
 
     // ============ 设置目的地 ============
@@ -604,7 +697,12 @@ export default {
   font-size: 30rpx;
   font-weight: 600;
   color: #1f2937;
+  flex-shrink: 0;
+}
+
+.header-spacer {
   flex: 1;
+  min-width: 12rpx;
 }
 
 .refresh-btn {
@@ -616,7 +714,7 @@ export default {
   justify-content: center;
   border-radius: 50%;
   background: #eff6ff;
-  margin-left: 16rpx;
+  margin-left: 8rpx;
 
   &:active {
     opacity: 0.7;
@@ -789,7 +887,12 @@ export default {
   font-size: 26rpx;
   font-weight: 600;
   color: #1e293b;
+  flex-shrink: 0;
+}
+
+.pallet-header-spacer {
   flex: 1;
+  min-width: 8rpx;
 }
 
 .pallet-status-badge {
@@ -1133,5 +1236,33 @@ export default {
 .input-placeholder {
   color: #9ca3af;
   font-size: 26rpx;
+}
+
+/* ---- 添加托盘按钮（MSE标题旁） ---- */
+.add-pallet-btn {
+  flex-shrink: 0;
+  margin-left: 16rpx;
+  font-size: 22rpx;
+  height: 44rpx;
+  line-height: 44rpx;
+  padding: 0 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+/* ---- 添加箱子按钮（托盘头内） ---- */
+.add-goods-btn {
+  flex-shrink: 0;
+  margin-left: 12rpx;
+  font-size: 20rpx;
+  height: 40rpx;
+  line-height: 40rpx;
+  padding: 0 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 </style>
