@@ -88,6 +88,13 @@
                     {{ { '0': '待扫', '1': '部分扫', '2': '已完成' }[pallet.trayStatus] || '待扫' }}
                   </view>
                   <view class="goods-count-badge">{{ (pallet.goods || []).length }} 件</view>
+                  <view
+                    class="delete-btn pallet-delete-btn"
+                    :class="{ 'btn-loading': deletingPalletId === pallet.id }"
+                    @tap.stop="handleDeletePallet(pallet)"
+                  >
+                    <uni-icons type="closeempty" size="14" color="#fff"></uni-icons>
+                  </view>
                 </view>
 
                 <!-- 货物：横向小卡片（紧凑三行：品名 / 规格 / UID） -->
@@ -99,6 +106,13 @@
                       v-for="(item, gIndex) in (pallet.goods || [])"
                       :key="item.uid || gIndex"
                     >
+                      <view
+                        class="goods-delete-btn"
+                        :class="{ 'btn-loading': deletingGoodsUid === item.uid }"
+                        @tap.stop="handleDeleteGoods(pallet, item)"
+                      >
+                        <uni-icons type="closeempty" size="10" color="#fff"></uni-icons>
+                      </view>
                       <text class="goods-chip-name">{{ item.productName || '—' }}</text>
                       <text class="goods-chip-spec">{{ item.spec || '—' }}</text>
                       <text class="goods-chip-uid">{{ item.uid || '—' }}</text>
@@ -229,7 +243,10 @@ export default {
       // 添加托盘/箱子
       addingPallet: false,
       addGoodsPalletId: null,
-      showAddGoodsScan: false
+      showAddGoodsScan: false,
+      // 删除状态追踪
+      deletingPalletId: null,
+      deletingGoodsUid: null
     }
   },
   computed: {
@@ -544,6 +561,74 @@ export default {
         console.error('添加箱子失败:', e)
         uni.showToast({ title: '网络异常，请重试', icon: 'none' })
       }
+    },
+
+    // ============ 删除托盘 / 删除货物 ============
+
+    async handleDeletePallet(pallet) {
+      if (!pallet || !pallet.id || this.deletingPalletId) return
+      uni.showModal({
+        title: '确认删除',
+        content: `确认删除托盘 ${pallet.palletNo || pallet.id} 及其所有货物？`,
+        confirmColor: '#ef4444',
+        success: async (res) => {
+          if (!res.confirm) return
+          this.deletingPalletId = pallet.id
+          try {
+            const ret = await request.post('/produce_pallet/delete', { palletId: String(pallet.id) })
+            if (ret && ret.code === '200') {
+              // 从本地数据中移除该托盘
+              if (this.currentBatch && this.currentBatch.pallets) {
+                const idx = this.currentBatch.pallets.findIndex(p => p.id === pallet.id)
+                if (idx >= 0) {
+                  this.currentBatch.pallets.splice(idx, 1)
+                }
+              }
+              uni.showToast({ title: '托盘已删除', icon: 'success', duration: 1500 })
+            } else {
+              uni.showToast({ title: ret?.message || '删除失败', icon: 'none' })
+            }
+          } catch (e) {
+            console.error('删除托盘失败:', e)
+            uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+          } finally {
+            this.deletingPalletId = null
+          }
+        }
+      })
+    },
+
+    async handleDeleteGoods(pallet, item) {
+      if (!item || !item.uid || this.deletingGoodsUid) return
+      uni.showModal({
+        title: '确认删除',
+        content: `确认删除货物 ${item.uid}？`,
+        confirmColor: '#ef4444',
+        success: async (res) => {
+          if (!res.confirm) return
+          this.deletingGoodsUid = item.uid
+          try {
+            const ret = await request.post('/produce_goods/delete', { uid: item.uid })
+            if (ret && ret.code === '200') {
+              // 从本地数据中移除该货物
+              if (pallet.goods) {
+                const idx = pallet.goods.findIndex(g => g.uid === item.uid)
+                if (idx >= 0) {
+                  pallet.goods.splice(idx, 1)
+                }
+              }
+              uni.showToast({ title: '货物已删除', icon: 'success', duration: 1500 })
+            } else {
+              uni.showToast({ title: ret?.message || '删除失败', icon: 'none' })
+            }
+          } catch (e) {
+            console.error('删除货物失败:', e)
+            uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+          } finally {
+            this.deletingGoodsUid = null
+          }
+        }
+      })
     },
 
     // ============ 设置目的地 ============
@@ -948,6 +1033,28 @@ export default {
   position: relative;
 }
 
+.goods-delete-btn {
+  position: absolute;
+  top: -8rpx;
+  right: -8rpx;
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 50%;
+  background: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2rpx 6rpx rgba(239, 68, 68, 0.4);
+  z-index: 2;
+
+  &:active { opacity: 0.7; }
+
+  &.btn-loading {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+}
+
 .goods-chip-name {
   font-size: 22rpx;
   font-weight: 600;
@@ -1136,6 +1243,30 @@ export default {
   background: #f3f4f6;
   padding: 4rpx 14rpx;
   border-radius: 20rpx;
+}
+
+/* ---- 删除按钮（通用） ---- */
+.delete-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 2rpx 6rpx rgba(239, 68, 68, 0.35);
+
+  &:active { opacity: 0.7; }
+
+  &.btn-loading {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+}
+
+.pallet-delete-btn {
+  width: 40rpx;
+  height: 40rpx;
+  margin-left: 12rpx;
 }
 
 /* 空状态 */
