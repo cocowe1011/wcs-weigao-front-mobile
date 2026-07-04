@@ -320,11 +320,32 @@ export default {
       }
     },
 
+    /**
+     * 根据批次ID重新加载当前批次的完整数据（含托盘+货物）
+     */
+    async reloadCurrentBatch() {
+      if (!this.currentBatch || !this.currentBatch.batch || !this.currentBatch.batch.id) return
+      try {
+        const res = await request.get('/produce_batch/getById', { id: this.currentBatch.batch.id })
+        if (res && res.code === '200' && res.data) {
+          this.currentBatch = res.data
+        }
+      } catch (e) {
+        console.error('重新加载批次数据失败:', e)
+      }
+    },
+
     async handleRefresh() {
       if (this.refreshing) return
       this.refreshing = true
       try {
-        await this.loadCurrentExecuting()
+        if (this.currentBatch && this.currentBatch.batch && this.currentBatch.batch.id) {
+          // 当前已有批次，按ID重新加载完整数据
+          await this.reloadCurrentBatch()
+        } else {
+          // 无当前批次，尝试加载正在执行的批次
+          await this.loadCurrentExecuting()
+        }
         if (this.isProducing && this.currentBatch && this.currentBatch.batch) {
           await this.loadCurrentDest(this.currentBatch.batch.id)
         } else {
@@ -433,7 +454,7 @@ export default {
           if (!res.confirm) return
           this.confirming = true
           try {
-            const ret = await request.post('/produce_batch/confirm', { batchId: this.currentBatch.batch.id })
+            const ret = await request.post('/produce_batch/confirm', { id: this.currentBatch.batch.id })
             if (ret && ret.code === '200') {
               this.currentBatch.batch.status = '1'
               uni.showToast({ title: '批次已确认', icon: 'success', duration: 1500 })
@@ -461,7 +482,7 @@ export default {
           if (!res.confirm) return
           this.canceling = true
           try {
-            const ret = await request.post('/produce_batch/cancel', { batchId: this.currentBatch.batch.id })
+            const ret = await request.post('/produce_batch/cancel', { id: this.currentBatch.batch.id })
             if (ret && ret.code === '200') {
               this.currentBatch.batch.status = '0'
               this.currentDest = ''
@@ -501,12 +522,9 @@ export default {
         const ret = await request.post('/produce_batch/addPallet', {
           batchId: this.currentBatch.batch.id
         })
-        if (ret && ret.code === '200' && ret.data) {
-          // 将新托盘追加到当前批次
-          if (!this.currentBatch.pallets) {
-            this.$set(this.currentBatch, 'pallets', [])
-          }
-          this.currentBatch.pallets.push(ret.data)
+        if (ret && ret.code === '200') {
+          // 从服务端重新加载完整批次数据，确保状态一致
+          await this.reloadCurrentBatch()
           uni.showToast({ title: '已添加空托盘', icon: 'success', duration: 1500 })
         } else {
           uni.showToast({ title: ret?.message || '添加托盘失败', icon: 'none' })
@@ -544,15 +562,9 @@ export default {
           palletId: String(palletId),
           uid: uid
         })
-        if (ret && ret.code === '200' && ret.data) {
-          // 找到对应托盘，将新货物追加进去
-          const pallet = this.currentBatch.pallets.find(p => String(p.id) === String(palletId))
-          if (pallet) {
-            if (!pallet.goods) {
-              this.$set(pallet, 'goods', [])
-            }
-            pallet.goods.push(ret.data)
-          }
+        if (ret && ret.code === '200') {
+          // 从服务端重新加载完整批次数据，确保托盘状态等字段同步
+          await this.reloadCurrentBatch()
           uni.showToast({ title: '已添加箱子', icon: 'success', duration: 1500 })
         } else {
           uni.showToast({ title: ret?.message || '添加箱子失败', icon: 'none', duration: 2000 })
@@ -575,15 +587,10 @@ export default {
           if (!res.confirm) return
           this.deletingPalletId = pallet.id
           try {
-            const ret = await request.post('/produce_pallet/delete', { palletId: String(pallet.id) })
+            const ret = await request.post('/produce_pallet/delete', { id: String(pallet.id) })
             if (ret && ret.code === '200') {
-              // 从本地数据中移除该托盘
-              if (this.currentBatch && this.currentBatch.pallets) {
-                const idx = this.currentBatch.pallets.findIndex(p => p.id === pallet.id)
-                if (idx >= 0) {
-                  this.currentBatch.pallets.splice(idx, 1)
-                }
-              }
+              // 从服务端重新加载完整批次数据
+              await this.reloadCurrentBatch()
               uni.showToast({ title: '托盘已删除', icon: 'success', duration: 1500 })
             } else {
               uni.showToast({ title: ret?.message || '删除失败', icon: 'none' })
@@ -599,7 +606,7 @@ export default {
     },
 
     async handleDeleteGoods(pallet, item) {
-      if (!item || !item.uid || this.deletingGoodsUid) return
+      if (!item || !item.id || this.deletingGoodsUid) return
       uni.showModal({
         title: '确认删除',
         content: `确认删除货物 ${item.uid}？`,
@@ -608,15 +615,10 @@ export default {
           if (!res.confirm) return
           this.deletingGoodsUid = item.uid
           try {
-            const ret = await request.post('/produce_goods/delete', { uid: item.uid })
+            const ret = await request.post('/produce_goods/delete', { id: String(item.id) })
             if (ret && ret.code === '200') {
-              // 从本地数据中移除该货物
-              if (pallet.goods) {
-                const idx = pallet.goods.findIndex(g => g.uid === item.uid)
-                if (idx >= 0) {
-                  pallet.goods.splice(idx, 1)
-                }
-              }
+              // 从服务端重新加载完整批次数据，确保托盘状态等字段同步
+              await this.reloadCurrentBatch()
               uni.showToast({ title: '货物已删除', icon: 'success', duration: 1500 })
             } else {
               uni.showToast({ title: ret?.message || '删除失败', icon: 'none' })
