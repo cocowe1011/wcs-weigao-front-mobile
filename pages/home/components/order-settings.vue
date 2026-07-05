@@ -23,7 +23,7 @@
               v-model="barcodeInput"
               placeholder="请输入条码或点击扫码"
               placeholder-class="input-placeholder"
-              @confirm="doQuery"
+              @confirm="handleManualConfirm"
             />
             <view
               class="scan-query-btn"
@@ -228,11 +228,14 @@ import request from '@/config/request.js'
 export default {
   name: 'OrderSettings',
   components: { PdaScan, LoadingSpin },
+  inject: ['provideWsClient', 'provideWsConnected'],
   data() {
     return {
       pageReady: false,
       // 来货查询
       barcodeInput: '',
+      // 扫码查询模式：mock-自动创建数据 / mse-调用MSE接口
+      scanMode: 'mock',
       scanning: false,
       confirming: false,
       canceling: false,
@@ -395,12 +398,54 @@ export default {
       }
     },
 
+    // 点“扫码查询”按钮：弹二选一 → 每次都打开扫码组件（忽略文本框里的旧码）
     handleScanBtnTap() {
-      if (this.barcodeInput.trim()) {
-        this.doQuery()
-      } else {
-        this.showPdaScan = true
+      this.pickMode((mode) => this.openScan(mode))
+    },
+
+    // 输入框回车：手动输入条码时用输入值查询（同样弹二选一选择模式）
+    handleManualConfirm() {
+      const uid = this.cleanBarcode(this.barcodeInput)
+      if (!uid) return
+      this.pickMode((mode) => {
+        this.scanMode = mode
+        if (mode === 'mse') {
+          this.runMseQuery(uid)
+        } else {
+          this.doQuery(uid)
+        }
+      })
+    },
+
+    // 弹出“自动创建数据 / 调用MSE接口”二选一
+    pickMode(onPick) {
+      uni.showActionSheet({
+        itemList: ['自动创建数据', '调用MSE接口'],
+        success: (res) => {
+          if (res.tapIndex === 0) onPick('mock')
+          else if (res.tapIndex === 1) onPick('mse')
+        }
+      })
+    },
+
+    // 忽略文本框内容，清空后直接打开扫码组件（每次扫码查询都重新扫）
+    openScan(mode) {
+      this.scanMode = mode
+      this.barcodeInput = ''
+      // MSE 模式扫码前先判断 SOCKET 连接是否正常
+      if (mode === 'mse' && !this.ensureSocketConnected()) return
+      this.showPdaScan = true
+    },
+
+    // 判断与 WCS 的 SOCKET(WebSocket) 连接是否正常
+    ensureSocketConnected() {
+      const wsClient = this.provideWsClient && this.provideWsClient()
+      const connected = this.provideWsConnected && this.provideWsConnected()
+      if (!wsClient || !connected) {
+        uni.showToast({ title: 'WCS(SOCKET)未连接，无法调用MSE接口', icon: 'none', duration: 2500 })
+        return false
       }
+      return true
     },
 
     onPdaClose() {
@@ -409,13 +454,28 @@ export default {
 
     onPdaConfirm(scanCode) {
       this.showPdaScan = false
-      if (!scanCode) return
-      this.barcodeInput = this.cleanBarcode(scanCode)
-      this.doQuery()
+      const uid = this.cleanBarcode(scanCode)
+      if (!uid) return
+      if (this.scanMode === 'mse') {
+        this.runMseQuery(uid)
+      } else {
+        this.doQuery(uid)
+      }
     },
 
-    async doQuery() {
-      const uid = this.cleanBarcode(this.barcodeInput)
+    // 按 uid 查询批次并填充，返回是否查询到
+    async loadBatchByUid(uid) {
+      const res = await request.get('/produce_batch/getByGoodsUid', { uid })
+      if (res && res.data) {
+        this.currentBatch = res.data
+        return true
+      }
+      return false
+    },
+
+    // 自动创建数据流程：查不到则 mock 创建
+    async doQuery(uid) {
+      uid = this.cleanBarcode(uid || this.barcodeInput)
       if (!uid) {
         uni.showToast({ title: '请输入条码', icon: 'none' })
         return
@@ -424,9 +484,8 @@ export default {
       this.pageLoading = true
       this.pageLoadingText = '查询中…'
       try {
-        const res = await request.get('/produce_batch/getByGoodsUid', { uid })
-        if (res && res.data) {
-          this.currentBatch = res.data
+        const found = await this.loadBatchByUid(uid)
+        if (found) {
           uni.showToast({ title: '查询到批次信息', icon: 'success', duration: 1500 })
         } else {
           await this.createMockBatch(uid)
@@ -437,17 +496,80 @@ export default {
       } finally {
         this.scanning = false
         this.pageLoading = false
+        // 处理完清空文本框，避免下次复用旧码
+        this.barcodeInput = ''
+      }
+    },
+
+    // 调用MSE接口流程：先判断是否已建档，未建档才通过 SOCKET 交给 WCS 调 MSE 写库，成功再用条码查询展示
+    async runMseQuery(uid) {
+      if (!uid) {
+        uni.showToast({ title: '请输入或扫描条码', icon: 'none' })
+        return
+      }
+      this.scanning = true
+      this.pageLoading = true
+      this.pageLoadingText = '查询中…'
+      try {
+        // 1. 先判断该码是否已在库建档，已建档直接展示（无需再调 MSE）
+        const exists = await this.loadBatchByUid(uid)
+        if (exists) {
+          uni.showToast({ title: '该条码已建档，直接展示', icon: 'success', duration: 1500 })
+          return
+        }
+        // 2. 未建档才走 MSE（需 SOCKET 连接）
+        if (!this.ensureSocketConnected()) return
+        const wsClient = this.provideWsClient()
+        this.pageLoadingText = 'MSE查询中…'
+        // 发送 UDI 给 WCS，等待成功/失败信号
+        await wsClient.sendMseQuery(uid)
+        // 成功后用刚才的条码查询订单信息并展示
+        this.pageLoadingText = '加载订单中…'
+        const found = await this.loadBatchByUid(uid)
+        if (found) {
+          uni.showToast({ title: 'MSE查询成功', icon: 'success', duration: 1500 })
+        } else {
+          uni.showToast({ title: '已写入但未查询到订单，请刷新重试', icon: 'none', duration: 2500 })
+        }
+      } catch (e) {
+        console.error('MSE查询失败:', e)
+        uni.showToast({ title: (e && e.message) || 'MSE查询失败', icon: 'none', duration: 2500 })
+      } finally {
+        this.scanning = false
+        this.pageLoading = false
+        // 处理完清空文本框，避免下次复用旧码
+        this.barcodeInput = ''
       }
     },
 
     async createMockBatch(uid) {
+      const now = String(Date.now())
       const dto = {
-        batch: { batchNo: String(Date.now()), status: '0' },
+        batch: {
+          batchNo: now,
+          sterilizationOrderNo: now + '-MJ',
+          palletQuantity: 1,
+          sterilizerNameCode: '0302',
+          processPlanNameCode: 'EO',
+          status: '0'
+        },
         pallets: [
           {
-            palletNo: 'TP-01',
+            palletNo: 'MJF' + now.slice(-12),
+            toWarehouse: '1',
             trayStatus: '0',
-            goods: [{ productName: '一次性口罩', spec: '1000个/箱', remark: '', uid }]
+            goods: [
+              {
+                productName: '一次性口罩',
+                spec: '1000个/箱',
+                productCode: '01.02.01.0615',
+                productionBatchNumber: '20260621',
+                productionDate: '2026-06-24',
+                remark: '',
+                uid,
+                udi: uid
+              }
+            ]
           }
         ]
       }

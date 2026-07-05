@@ -22,6 +22,10 @@ class AlarmWebSocketClient {
     this.onPlcWriteResponse = config.onPlcWriteResponse || null;
     
     this.alarmLogs = []; // 存储接收到的报警日志
+
+    // MSE 订单查询请求/响应关联表：requestId -> { resolve, reject, timer }
+    this.msePending = {};
+    this.mseRequestSeq = 0;
   }
 
   // 连接WebSocket服务器
@@ -143,6 +147,11 @@ class AlarmWebSocketClient {
         // 处理扫码结果
         this.handleScanResult(data);
         break;
+
+      case 'mse_order_result':
+        // 处理 MSE 订单查询结果
+        this.handleMseOrderResult(data);
+        break;
         
       case 'plc_write_response':
         // 处理 PLC 写入响应
@@ -218,6 +227,57 @@ class AlarmWebSocketClient {
     };
     
     return this.send(message);
+  }
+
+  /**
+   * 发送 MSE 订单查询请求，返回 Promise（PC 端处理完通过 mse_order_result 回传结果）
+   * @param {string} udi - PDA 扫码得到的条码（去括号形式）
+   * @param {number} timeout - 超时兜底毫秒（默认 6000，略大于 PC 端 MSE 2s 超时 + 写库耗时）
+   * @returns {Promise<{success:boolean, message:string}>}
+   */
+  sendMseQuery(udi, timeout = 6000) {
+    return new Promise((resolve, reject) => {
+      if (!this.socketTask || !this.isConnected) {
+        reject(new Error('WebSocket未连接'));
+        return;
+      }
+      const requestId = `mse_${Date.now()}_${++this.mseRequestSeq}`;
+      const timer = setTimeout(() => {
+        if (this.msePending[requestId]) {
+          delete this.msePending[requestId];
+          reject(new Error('MSE查询超时，请重试'));
+        }
+      }, timeout);
+      this.msePending[requestId] = { resolve, reject, timer };
+
+      const ok = this.send({
+        type: 'query_mse_order',
+        udi: udi,
+        requestId: requestId,
+        timestamp: new Date().toISOString()
+      });
+      if (!ok) {
+        clearTimeout(timer);
+        delete this.msePending[requestId];
+        reject(new Error('消息发送失败，WebSocket未连接'));
+      }
+    });
+  }
+
+  // 处理 MSE 订单查询结果（按 requestId 关联对应请求的 Promise）
+  handleMseOrderResult(data) {
+    const pending = data && data.requestId && this.msePending[data.requestId];
+    if (!pending) {
+      console.warn('收到未匹配的 MSE 查询结果:', data);
+      return;
+    }
+    clearTimeout(pending.timer);
+    delete this.msePending[data.requestId];
+    if (data.success) {
+      pending.resolve({ success: true, message: data.message || '查询成功' });
+    } else {
+      pending.reject(new Error((data && data.message) || 'MSE查询失败'));
+    }
   }
 
   // 发送托盘数据变更通知（PC端收到后更新队列中对应托盘状态）
