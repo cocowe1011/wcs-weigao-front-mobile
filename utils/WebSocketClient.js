@@ -6,8 +6,9 @@ class AlarmWebSocketClient {
     this.socketTask = null;
     this.isConnected = false;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectInterval = 3000; // 3秒
+    this.maxReconnectAttempts = 360;
+    this.reconnectInterval = 5000; // 5秒，360次×5秒≈30分钟
+    this.isReconnecting = false; // 防止onError和onClose双重触发重连
     this.heartbeatInterval = null;
     this.pingTimer = null;
     
@@ -38,6 +39,7 @@ class AlarmWebSocketClient {
           if (this.onError) {
             this.onError(error);
           }
+          this.attemptReconnect();
         }
       });
       
@@ -46,6 +48,7 @@ class AlarmWebSocketClient {
         console.log('WebSocket连接已建立');
         this.isConnected = true;
         this.reconnectAttempts = 0;
+        this.isReconnecting = false;
         
         // 注册客户端
         this.register();
@@ -89,6 +92,9 @@ class AlarmWebSocketClient {
         if (this.onError) {
           this.onError(error);
         }
+        
+        // onError后也需要尝试重连（某些情况下onClose不会触发）
+        this.attemptReconnect();
       });
 
     } catch (error) {
@@ -96,6 +102,7 @@ class AlarmWebSocketClient {
       if (this.onError) {
         this.onError(error);
       }
+      this.attemptReconnect();
     }
   }
 
@@ -294,11 +301,15 @@ class AlarmWebSocketClient {
 
   // 尝试重连
   attemptReconnect() {
+    // 防止onError和onClose双重触发重连
+    if (this.isReconnecting) return;
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.isReconnecting = true;
       this.reconnectAttempts++;
       console.log(`尝试重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
       
       setTimeout(() => {
+        this.isReconnecting = false;
         this.connect();
       }, this.reconnectInterval);
     } else {
@@ -325,6 +336,7 @@ class AlarmWebSocketClient {
     }
     
     this.isConnected = false;
+    this.isReconnecting = false;
     this.reconnectAttempts = this.maxReconnectAttempts; // 阻止自动重连
   }
 

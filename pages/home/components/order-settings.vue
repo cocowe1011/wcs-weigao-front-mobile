@@ -2,6 +2,14 @@
   <view class="order-settings">
     <view class="page-layout" :style="{ opacity: pageReady ? 1 : 0 }">
 
+      <!-- 页面级 loading 遮罩 -->
+      <view v-if="pageLoading" class="page-loading-overlay">
+        <view class="page-loading-box">
+          <loading-spin :size="48"></loading-spin>
+          <text class="page-loading-text">{{ pageLoadingText }}</text>
+        </view>
+      </view>
+
       <!-- 来货查询区域（固定高度） -->
       <view class="section section-query">
         <view class="section-header">
@@ -214,11 +222,12 @@
 
 <script>
 import PdaScan from '@/components/pda-scan.vue'
+import LoadingSpin from '@/components/loading-spin.vue'
 import request from '@/config/request.js'
 
 export default {
   name: 'OrderSettings',
-  components: { PdaScan },
+  components: { PdaScan, LoadingSpin },
   data() {
     return {
       pageReady: false,
@@ -246,7 +255,10 @@ export default {
       showAddGoodsScan: false,
       // 删除状态追踪
       deletingPalletId: null,
-      deletingGoodsUid: null
+      deletingGoodsUid: null,
+      // 页面级 loading
+      pageLoading: false,
+      pageLoadingText: '加载中…'
     }
   },
   computed: {
@@ -338,6 +350,8 @@ export default {
     async handleRefresh() {
       if (this.refreshing) return
       this.refreshing = true
+      this.pageLoading = true
+      this.pageLoadingText = '刷新中…'
       try {
         if (this.currentBatch && this.currentBatch.batch && this.currentBatch.batch.id) {
           // 当前已有批次，按ID重新加载完整数据
@@ -359,6 +373,7 @@ export default {
         uni.showToast({ title: '刷新失败', icon: 'none' })
       } finally {
         this.refreshing = false
+        this.pageLoading = false
       }
     },
 
@@ -406,6 +421,8 @@ export default {
         return
       }
       this.scanning = true
+      this.pageLoading = true
+      this.pageLoadingText = '查询中…'
       try {
         const res = await request.get('/produce_batch/getByGoodsUid', { uid })
         if (res && res.data) {
@@ -419,6 +436,7 @@ export default {
         uni.showToast({ title: '网络异常，请重试', icon: 'none' })
       } finally {
         this.scanning = false
+        this.pageLoading = false
       }
     },
 
@@ -518,6 +536,8 @@ export default {
     async handleAddPallet() {
       if (!this.currentBatch || !this.currentBatch.batch || this.addingPallet) return
       this.addingPallet = true
+      this.pageLoading = true
+      this.pageLoadingText = '添加托盘中…'
       try {
         const ret = await request.post('/produce_batch/addPallet', {
           batchId: this.currentBatch.batch.id
@@ -534,6 +554,7 @@ export default {
         uni.showToast({ title: '网络异常，请重试', icon: 'none' })
       } finally {
         this.addingPallet = false
+        this.pageLoading = false
       }
     },
 
@@ -556,6 +577,8 @@ export default {
       if (!uid || !palletId) return
       if (!this.currentBatch || !this.currentBatch.batch) return
 
+      this.pageLoading = true
+      this.pageLoadingText = '添加箱子中…'
       try {
         const ret = await request.post('/produce_batch/addGoods', {
           batchId: String(this.currentBatch.batch.id),
@@ -572,6 +595,8 @@ export default {
       } catch (e) {
         console.error('添加箱子失败:', e)
         uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+      } finally {
+        this.pageLoading = false
       }
     },
 
@@ -717,6 +742,7 @@ export default {
   background: #f0f2f5;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 /* 整体布局容器：flex 列，撑满父级 */
@@ -1397,5 +1423,35 @@ export default {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+}
+
+/* ---- 页面级 loading 遮罩 ---- */
+.page-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.page-loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32rpx 48rpx;
+  background: #fff;
+  border-radius: 20rpx;
+  box-shadow: 0 4rpx 24rpx rgba(0, 0, 0, 0.12);
+}
+
+.page-loading-text {
+  margin-top: 16rpx;
+  font-size: 26rpx;
+  color: #6b7280;
 }
 </style>

@@ -2,6 +2,14 @@
   <view class="scan-recheck">
     <view class="page-layout" :style="{ opacity: pageReady ? 1 : 0 }">
 
+      <!-- 页面级 loading 遮罩 -->
+      <view v-if="pageLoading" class="page-loading-overlay">
+        <view class="page-loading-box">
+          <loading-spin :size="48"></loading-spin>
+          <text class="page-loading-text">{{ pageLoadingText }}</text>
+        </view>
+      </view>
+
       <!-- 顶部：扫码复检标题 + 刷新 + 扫码按钮 -->
       <view class="section section-header-bar">
         <view class="section-header">
@@ -117,16 +125,19 @@
 
 <script>
 import PdaScan from '@/components/pda-scan.vue'
+import LoadingSpin from '@/components/loading-spin.vue'
 import request from '@/config/request.js'
 
 export default {
   name: 'ScanRecheck',
-  components: { PdaScan },
+  components: { PdaScan, LoadingSpin },
   inject: ['provideWsClient', 'provideWsConnected'],
   data() {
     return {
       pageReady: false,
       loading: false,
+      pageLoading: false,
+      pageLoadingText: '加载中…',
       scanning: false,
       sendingCmd: false,
       showPdaScan: false,
@@ -151,9 +162,10 @@ export default {
     totalCount() {
       return ((this.currentPallet && this.currentPallet.goods) || []).length
     },
-    // 下发通行命令：需要有托盘且有目的地
+    // 下发通行命令：需要有托盘、目的地、且全部扫完
     canSendCmd() {
-      return !!this.currentPallet && !!this.currentDestination && !this.sendingCmd && !this.loading
+      if (!this.currentPallet || !this.currentDestination || this.sendingCmd || this.loading) return false
+      return this.totalCount > 0 && this.scannedCount === this.totalCount
     }
   },
   async mounted() {
@@ -166,6 +178,8 @@ export default {
 
     async loadData() {
       this.loading = true
+      this.pageLoading = true
+      this.pageLoadingText = '加载中…'
       try {
         // 1. 查当前执行批次
         const batchRes = await request.get('/produce_batch/getCurrentExecuting')
@@ -194,11 +208,12 @@ export default {
         uni.showToast({ title: '加载失败，请重试', icon: 'none' })
       } finally {
         this.loading = false
+        this.pageLoading = false
       }
     },
 
     async handleRefresh() {
-      if (this.loading) return
+      if (this.loading || this.pageLoading) return
       await this.loadData()
       uni.showToast({ title: '刷新成功', icon: 'success', duration: 1200 })
     },
@@ -293,7 +308,19 @@ export default {
     },
 
     async handleSendCommand() {
-      if (!this.canSendCmd) return
+      if (!this.canSendCmd) {
+        if (this.currentPallet && this.scannedCount < this.totalCount) {
+          uni.showToast({ title: `还有 ${this.totalCount - this.scannedCount} 件货物未扫码，请全部扫完后再下发`, icon: 'none', duration: 2000 })
+        }
+        return
+      }
+      // 先检查WebSocket连接，避免后端接口已执行但PLC命令未发送
+      const wsClient = this.provideWsClient()
+      const wsConnected = this.provideWsConnected()
+      if (!wsClient || !wsConnected) {
+        uni.showToast({ title: '未连接到服务器，无法下发PLC命令', icon: 'none', duration: 2000 })
+        return
+      }
       uni.showModal({
         title: '下发通行命令',
         content: `确认为托盘 ${this.currentPallet.palletNo || this.currentPallet.id} 下发通行命令？`,
@@ -302,6 +329,8 @@ export default {
         success: async (modal) => {
           if (!modal.confirm) return
           this.sendingCmd = true
+          this.pageLoading = true
+          this.pageLoadingText = '下发中…'
           try {
             // 1. 调后端重新发送目的地（999→正确目的地+1/2后缀）
             const res = await request.post('/produce_pallet/resendDestination', {
@@ -346,6 +375,7 @@ export default {
             uni.showToast({ title: '网络异常，请重试', icon: 'none' })
           } finally {
             this.sendingCmd = false
+            this.pageLoading = false
           }
         }
       })
@@ -371,6 +401,7 @@ export default {
   padding-bottom: 24rpx;
   transition: opacity 0.3s ease;
   overflow: hidden;
+  position: relative;
 }
 
 .page-layout > .section:not(:last-child) {
@@ -745,5 +776,35 @@ export default {
   font-weight: 700;
   color: #fff;
   letter-spacing: 2rpx;
+}
+
+/* ---- 页面级 loading 遮罩 ---- */
+.page-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.page-loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32rpx 48rpx;
+  background: #fff;
+  border-radius: 20rpx;
+  box-shadow: 0 4rpx 24rpx rgba(0, 0, 0, 0.12);
+}
+
+.page-loading-text {
+  margin-top: 16rpx;
+  font-size: 26rpx;
+  color: #6b7280;
 }
 </style>

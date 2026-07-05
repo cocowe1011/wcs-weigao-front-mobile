@@ -302,6 +302,14 @@ export default {
 
     // 执行 PLC 写入（按点位规定顺序）
     executePlcWrite() {
+      // 先检查WebSocket连接，避免命令部分发送部分失败
+      const wsClient = this.provideWsClient()
+      const wsConnected = this.provideWsConnected()
+      if (!wsClient || !wsConnected) {
+        uni.showToast({ title: '未连接到服务器，无法下发PLC命令', icon: 'none', duration: 2000 })
+        this.submitting = false
+        return
+      }
       const { motorCode, destCode, mockId, motorTargetCount } = this.form
 
       // 记录本次写入的所有地址，用于2s后取消

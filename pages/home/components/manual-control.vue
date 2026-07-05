@@ -251,6 +251,13 @@ export default {
     },
 
     toggleMode() {
+      // 先检查WebSocket连接，未连接则不切换模式
+      const wsClient = this.provideWsClient()
+      const wsConnected = this.provideWsConnected()
+      if (!wsClient || !wsConnected) {
+        uni.showToast({ title: '未连接到服务器', icon: 'none', duration: 1500 })
+        return
+      }
       const newMode = !this.isManual
       
       // 发送模式切换命令到 PLC
@@ -266,6 +273,13 @@ export default {
       })
     },
     toggleMotor(idx) {
+      // 先检查WebSocket连接，未连接则不切换选中状态
+      const wsClient = this.provideWsClient()
+      const wsConnected = this.provideWsConnected()
+      if (!wsClient || !wsConnected) {
+        uni.showToast({ title: '未连接到服务器', icon: 'none', duration: 1500 })
+        return
+      }
       const motor = this.motors[idx]
       motor.selected = !motor.selected
       
@@ -290,6 +304,13 @@ export default {
     },
     onPressStart(key) {
       if (!this.isManual) return
+      // 先检查WebSocket连接，未连接则不执行
+      const wsClient = this.provideWsClient()
+      const wsConnected = this.provideWsConnected()
+      if (!wsClient || !wsConnected) {
+        uni.showToast({ title: '未连接到服务器', icon: 'none', duration: 1500 })
+        return
+      }
       this.pressState[key] = true
       
       // 发送 PLC 命令：按下写 1

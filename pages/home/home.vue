@@ -7,6 +7,11 @@
     <view class="header">
       <view class="welcome">欢迎回来，{{ username }}</view>
       <view class="header-actions">
+        <!-- WCS连接状态 -->
+        <view class="ws-status-badge" :class="{ connected: wsStatus.isConnected, disconnected: !wsStatus.isConnected }">
+          <text class="ws-status-dot"></text>
+          <text class="ws-status-text">{{ wsStatus.isConnected ? '已连接WCS' : '未连接WCS' }}</text>
+        </view>
         <!-- 报警铃铛 -->
         <view class="alarm-bell" :class="{ 'has-unread': unreadAlarmCount > 0 }" @tap="toggleAlarmModal">
           <uni-icons type="notification-filled" size="24" color="#fff"></uni-icons>
@@ -383,6 +388,40 @@ export default {
     border: 1px solid rgba(255, 255, 255, 0.5);
     border-radius: 30rpx;
   }
+}
+
+.ws-status-badge {
+  display: flex;
+  align-items: center;
+  margin-right: 16rpx;
+  padding-top: 6rpx;
+  padding-bottom: 6rpx;
+  padding-left: 14rpx;
+  padding-right: 14rpx;
+  border-radius: 20rpx;
+  background: rgba(255, 255, 255, 0.15);
+  font-size: 22rpx;
+}
+
+.ws-status-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  display: block;
+  margin-right: 8rpx;
+}
+
+.ws-status-text {
+  color: #fff;
+  font-weight: 500;
+}
+
+.ws-status-badge.connected .ws-status-dot {
+  background: #10b981;
+}
+
+.ws-status-badge.disconnected .ws-status-dot {
+  background: #ef4444;
 }
 
 @keyframes bell-shake {
