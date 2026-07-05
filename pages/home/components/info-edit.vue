@@ -210,7 +210,12 @@ export default {
     async onPdaConfirm(uid) {
       this.showPdaScan = false
       if (!uid) return
-      await this.fetchPalletInfo(uid.trim())
+      await this.fetchPalletInfo(this.cleanBarcode(uid))
+    },
+
+    cleanBarcode(code) {
+      if (!code) return ''
+      return String(code).replace(/[^a-zA-Z0-9]/g, '').trim()
     },
 
     // 根据UDI码获取托盘信息

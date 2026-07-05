@@ -217,7 +217,12 @@ export default {
     async onPdaConfirm(uid) {
       this.showPdaScan = false
       if (!uid) return
-      await this.doMarkScanned(uid.trim())
+      await this.doMarkScanned(this.cleanBarcode(uid))
+    },
+
+    cleanBarcode(code) {
+      if (!code) return ''
+      return String(code).replace(/[^a-zA-Z0-9]/g, '').trim()
     },
 
     async doMarkScanned(uid) {
