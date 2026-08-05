@@ -342,7 +342,8 @@ export default {
               const updated = res.data
               const destValue = parseInt(updated.sendDestinationCode, 10)
 
-              // 2. 写PLC：DB1001.DBW24=1006，DB1001.DBW26=目的地值，DB1001.DBW182=1，DB1001.DBW184=1，持续2秒后取消
+              // 2. 写PLC：DB1001.DBW24=1006，DB1001.DBW26=目的地值，DB1001.DBW182=1，持续2秒后取消
+              //    DB1001.DBW184=1 晚1秒再发，持续2秒后取消
               const writtenAddresses = []
               this.sendPlcCommand('W_DBW24', 1006)
               writtenAddresses.push('W_DBW24')
@@ -350,13 +351,17 @@ export default {
               writtenAddresses.push('W_DBW26')
               this.sendPlcCommand('W_DBW182', 1)
               writtenAddresses.push('W_DBW182')
-              this.sendPlcCommand('W_DBW184', 1)
-              writtenAddresses.push('W_DBW184')
               setTimeout(() => {
                 writtenAddresses.forEach(addr => {
                   this.sendPlcCancelWrite(addr)
                 })
               }, 2000)
+              setTimeout(() => {
+                this.sendPlcCommand('W_DBW184', 1)
+                setTimeout(() => {
+                  this.sendPlcCancelWrite('W_DBW184')
+                }, 2000)
+              }, 1000)
 
               uni.showToast({ title: `通行命令已下发：${updated.sendDestinationCode}`, icon: 'success', duration: 2000 })
               // 通知PC端托盘数据变更（带上palletId和新目的地编码）

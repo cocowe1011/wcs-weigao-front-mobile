@@ -341,16 +341,20 @@ export default {
       this.sendPlcCommand(PLC_ADDRESSES.MODIFY_CMD, 1)
       writtenAddresses.push(PLC_ADDRESSES.MODIFY_CMD)
 
-      // 6. 发送复位信号 DB1001.DBW184（发送2秒后取消）
-      this.sendPlcCommand(PLC_ADDRESSES.RESET_SIGNAL, 1)
-      writtenAddresses.push(PLC_ADDRESSES.RESET_SIGNAL)
-
-      // 2秒后取消所有已写入的地址
+      // 2秒后取消已写入的地址（不含复位信号）
       setTimeout(() => {
         writtenAddresses.forEach(addr => {
           this.sendPlcCancelWrite(addr)
         })
       }, 2000)
+
+      // 6. 复位信号 DB1001.DBW184 晚1秒再发，持续2秒后取消
+      setTimeout(() => {
+        this.sendPlcCommand(PLC_ADDRESSES.RESET_SIGNAL, 1)
+        setTimeout(() => {
+          this.sendPlcCancelWrite(PLC_ADDRESSES.RESET_SIGNAL)
+        }, 2000)
+      }, 1000)
 
       uni.showToast({ title: '下发成功', icon: 'success', duration: 1500 })
       this.form = { motorCode: '', destCode: '', mockId: '', motorTargetCount: '' }
