@@ -68,6 +68,12 @@
           <view class="mse-batch-row">
             <text class="field-label">批次号</text>
             <text class="field-value batch-id">{{ currentBatch.batch && currentBatch.batch.batchNo }}</text>
+            <view
+              v-if="(currentBatch.batch && currentBatch.batch.sterilizerNameCode) || currentDest"
+              class="batch-dest-tag"
+            >
+              {{ (currentBatch.batch && currentBatch.batch.sterilizerNameCode) || currentDest }}
+            </view>
           </view>
           <view class="mse-divider"></view>
 
@@ -549,7 +555,7 @@ export default {
           batchNo: now,
           sterilizationOrderNo: now + '-MJ',
           palletQuantity: 1,
-          sterilizerNameCode: '0302',
+          sterilizerNameCode: '3201',
           processPlanNameCode: 'EO',
           status: '0'
         },
@@ -597,8 +603,16 @@ export default {
             const ret = await request.post('/produce_batch/confirm', { id: this.currentBatch.batch.id })
             if (ret && ret.code === '200') {
               this.currentBatch.batch.status = '1'
+              await this.loadCurrentDest(this.currentBatch.batch.id)
+              // 没有执行中的目的地时，才用灭菌柜编码预填选择框（不落库，需再点设置）
+              if (!this.currentDest) {
+                const destCode = this.currentBatch.batch.sterilizerNameCode
+                if (destCode) {
+                  const idx = this.destOptions.indexOf(destCode)
+                  this.destIndex = idx >= 0 ? idx : -1
+                }
+              }
               uni.showToast({ title: '批次已确认', icon: 'success', duration: 1500 })
-              this.loadCurrentDest(this.currentBatch.batch.id)
             } else {
               uni.showToast({ title: ret?.message || '确认失败，请重试', icon: 'none', duration: 2500 })
             }
@@ -1378,6 +1392,18 @@ export default {
   font-family: monospace;
   font-size: 26rpx;
   word-break: break-all;
+}
+
+.batch-dest-tag {
+  flex-shrink: 0;
+  margin-left: 16rpx;
+  padding: 4rpx 16rpx;
+  border-radius: 8rpx;
+  background: #fff7ed;
+  color: #ea580c;
+  font-size: 24rpx;
+  font-weight: 600;
+  font-family: monospace;
 }
 
 .mse-divider {
