@@ -174,22 +174,22 @@
           <view v-if="!isProducing && currentBatch" class="badge-tag tag-locked">需先允许生产</view>
         </view>
         <view class="section-card">
-          <!-- 目的地选择框 -->
+          <!-- 目的地选择框：MSE 模式不允许手动改；MOCK 模式可手动选/设/取消 -->
           <picker
-            :disabled="!isProducing || !!currentDest || destSettting"
+            :disabled="isMseMode || !isProducing || !!currentDest || destSettting"
             mode="selector"
             :range="destOptions"
             :value="destIndex"
             @change="onDestPickerChange"
           >
-            <view class="dest-picker-row" :class="{ 'picker-disabled': !isProducing || !!currentDest || destSettting }">
+            <view class="dest-picker-row" :class="{ 'picker-disabled': isMseMode || !isProducing || !!currentDest || destSettting }">
               <text class="dest-picker-text" :class="{ 'placeholder-text': destIndex < 0 }">
                 {{ destIndex >= 0 ? destOptions[destIndex] : '请选择预热房目的地' }}
               </text>
               <uni-icons type="arrowdown" size="16" color="#9ca3af"></uni-icons>
             </view>
           </picker>
-          <view class="dest-btn-row">
+          <view v-if="!isMseMode" class="dest-btn-row">
             <view
               class="dest-set-btn"
               :class="{ 'btn-disabled': !canSetDest, 'btn-loading': destSettting }"
@@ -204,6 +204,9 @@
             >
               <text class="dest-btn-text">{{ destCanceling ? '取消中…' : '取消设置' }}</text>
             </view>
+          </view>
+          <view v-else class="dest-btn-row">
+            <text class="dest-locked-hint">MSE 模式目的地由订单自动设定，不可手动修改</text>
           </view>
         </view>
       </view>
@@ -308,15 +311,20 @@ export default {
         !this.confirming &&
         !this.canceling
     },
+    isMseMode() {
+      return this.scanMode === 'mse'
+    },
     canSetDest() {
-      return this.isProducing &&
+      return !this.isMseMode &&
+        this.isProducing &&
         !this.currentDest &&
         this.destIndex >= 0 &&
         !this.destSettting &&
         !this.destCanceling
     },
     canCancelDest() {
-      return this.isProducing &&
+      return !this.isMseMode &&
+        this.isProducing &&
         !!this.currentDest &&
         !this.destSettting &&
         !this.destCanceling
@@ -506,6 +514,25 @@ export default {
       return false
     },
 
+    /** 切换/加载批次后同步目的地 UI，避免沿用上一单的 currentDest */
+    async syncDestStateForCurrentBatch() {
+      if (this.isProducing && this.currentBatch && this.currentBatch.batch) {
+        await this.loadCurrentDest(this.currentBatch.batch.id)
+      } else {
+        this.currentDest = ''
+        this.currentDestRecordId = null
+        this.destIndex = -1
+      }
+      const orderDest = this.currentBatch &&
+        this.currentBatch.batch &&
+        this.currentBatch.batch.sterilizerNameCode &&
+        String(this.currentBatch.batch.sterilizerNameCode).trim()
+      if (orderDest) {
+        const idx = this.destOptions.indexOf(orderDest)
+        if (idx >= 0) this.destIndex = idx
+      }
+    },
+
     // 自动创建数据流程：查不到则 mock 创建
     async doQuery(uid) {
       uid = this.cleanBarcode(uid || this.barcodeInput)
@@ -519,6 +546,7 @@ export default {
       try {
         const found = await this.loadBatchByUid(uid)
         if (found) {
+          await this.syncDestStateForCurrentBatch()
           uni.showToast({ title: '查询到批次信息', icon: 'success', duration: 1500 })
         } else {
           await this.createMockBatch(uid)
@@ -534,7 +562,7 @@ export default {
       }
     },
 
-    // 调用MSE接口流程：先判断是否已建档，未建档才通过 SOCKET 交给 WCS 调 MSE 写库，成功再用条码查询展示
+    // 调用MSE接口流程：先判断是否已建档；无论是否建档都经 SOCKET 调 MSE（已建档则比较并更新目的地），再用条码查询展示
     async runMseQuery(uid) {
       if (!uid) {
         uni.showToast({ title: '请输入或扫描条码', icon: 'none' })
@@ -544,23 +572,20 @@ export default {
       this.pageLoading = true
       this.pageLoadingText = '查询中…'
       try {
-        // 1. 先判断该码是否已在库建档，已建档直接展示（无需再调 MSE）
-        const exists = await this.loadBatchByUid(uid)
-        if (exists) {
-          uni.showToast({ title: '该条码已建档，直接展示', icon: 'success', duration: 1500 })
-          return
-        }
-        // 2. 未建档才走 MSE（需 SOCKET 连接）
+        // 1. 先查本地是否已建档（用于 Toast 文案区分）
+        const existedBefore = await this.loadBatchByUid(uid)
+        // 2. 始终走 MSE（需 SOCKET 连接）：未建档则写库，已建档则比较更新目的地
         if (!this.ensureSocketConnected()) return
         const wsClient = this.provideWsClient()
         this.pageLoadingText = 'MSE查询中…'
-        // 发送 UDI 给 WCS，等待成功/失败信号
-        await wsClient.sendMseQuery(uid)
+        const mseRet = await wsClient.sendMseQuery(uid)
         // 成功后用刚才的条码查询订单信息并展示
         this.pageLoadingText = '加载订单中…'
         const found = await this.loadBatchByUid(uid)
         if (found) {
-          uni.showToast({ title: 'MSE查询成功', icon: 'success', duration: 1500 })
+          await this.syncDestStateForCurrentBatch()
+          const msg = (mseRet && mseRet.message) || (existedBefore ? '已建档，已刷新' : 'MSE查询成功')
+          uni.showToast({ title: msg, icon: 'success', duration: 1500 })
         } else {
           uni.showToast({ title: '已写入但未查询到订单，请刷新重试', icon: 'none', duration: 2500 })
         }
@@ -582,7 +607,7 @@ export default {
           batchNo: now,
           sterilizationOrderNo: now + '-MJ',
           palletQuantity: 1,
-          sterilizerNameCode: '3201',
+          sterilizerNameCode: '',
           processPlanNameCode: 'EO',
           status: '0'
         },
@@ -610,6 +635,10 @@ export default {
         const saveRes = await request.post('/produce_batch/save', dto)
         if (saveRes && saveRes.data) {
           this.currentBatch = saveRes.data
+          // 新建 mock 无目的地，必须清掉上一单残留的 currentDest，否则标签会误显示
+          this.currentDest = ''
+          this.currentDestRecordId = null
+          this.destIndex = -1
           uni.showToast({ title: '已创建新批次', icon: 'success', duration: 1500 })
         }
       } catch (e) {
@@ -631,12 +660,20 @@ export default {
             if (ret && ret.code === '200') {
               this.currentBatch.batch.status = '1'
               await this.loadCurrentDest(this.currentBatch.batch.id)
-              // 没有执行中的目的地时，才用灭菌柜编码预填选择框（不落库，需再点设置）
+              // MSE：订单自带目的地则自动落库；MOCK：仅预填选择框，仍走手动「设置」
               if (!this.currentDest) {
-                const destCode = this.currentBatch.batch.sterilizerNameCode
+                const destCode = this.currentBatch.batch.sterilizerNameCode &&
+                  String(this.currentBatch.batch.sterilizerNameCode).trim()
                 if (destCode) {
                   const idx = this.destOptions.indexOf(destCode)
                   this.destIndex = idx >= 0 ? idx : -1
+                  if (this.isMseMode && idx >= 0) {
+                    const setOk = await this.applyDestination(destCode, { silent: true })
+                    if (!setOk) {
+                      uni.showToast({ title: '批次已确认，但目的地设置失败', icon: 'none', duration: 2500 })
+                      return
+                    }
+                  }
                 }
               }
               uni.showToast({ title: '批次已确认', icon: 'success', duration: 1500 })
@@ -827,6 +864,46 @@ export default {
       this.destIndex = Number(e.detail.value)
     },
 
+    /**
+     * 落库目的地（与手动「设置」同一接口）
+     * @param {string} destCode
+     * @param {{ silent?: boolean }} options silent=true 时不弹成功 Toast（由调用方统一提示）
+     * @returns {Promise<boolean>}
+     */
+    async applyDestination(destCode, options = {}) {
+      const silent = !!options.silent
+      if (!destCode || !this.currentBatch || !this.currentBatch.batch) return false
+      this.destSettting = true
+      try {
+        const ret = await request.post('/produce_batch_destination/set', {
+          batchId: String(this.currentBatch.batch.id),
+          destinationCode: destCode
+        })
+        if (ret && ret.code === '200') {
+          this.currentDest = destCode
+          this.currentDestRecordId = ret.data && ret.data.id
+          const idx = this.destOptions.indexOf(destCode)
+          this.destIndex = idx >= 0 ? idx : -1
+          if (!silent) {
+            uni.showToast({ title: `目的地已设为：${destCode}`, icon: 'success', duration: 1500 })
+          }
+          return true
+        }
+        if (!silent) {
+          uni.showToast({ title: ret?.message || '设置失败，请重试', icon: 'none', duration: 2000 })
+        }
+        return false
+      } catch (e) {
+        console.error('设置目的地失败:', e)
+        if (!silent) {
+          uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+        }
+        return false
+      } finally {
+        this.destSettting = false
+      }
+    },
+
     async handleSetDest() {
       if (!this.canSetDest) return
       if (!this.isProducing) {
@@ -841,25 +918,7 @@ export default {
         cancelText: '取消',
         success: async (modal) => {
           if (!modal.confirm) return
-          this.destSettting = true
-          try {
-            const ret = await request.post('/produce_batch_destination/set', {
-              batchId: String(this.currentBatch.batch.id),
-              destinationCode: destCode
-            })
-            if (ret && ret.code === '200') {
-              this.currentDest = destCode
-              this.currentDestRecordId = ret.data && ret.data.id
-              uni.showToast({ title: `目的地已设为：${destCode}`, icon: 'success', duration: 1500 })
-            } else {
-              uni.showToast({ title: ret?.message || '设置失败，请重试', icon: 'none', duration: 2000 })
-            }
-          } catch (e) {
-            console.error('设置目的地失败:', e)
-            uni.showToast({ title: '网络异常，请重试', icon: 'none' })
-          } finally {
-            this.destSettting = false
-          }
+          await this.applyDestination(destCode)
         }
       })
     },
@@ -1523,6 +1582,15 @@ export default {
   > .dest-cancel-btn {
     margin-left: 16rpx;
   }
+}
+
+.dest-locked-hint {
+  flex: 1;
+  font-size: 24rpx;
+  color: #9ca3af;
+  text-align: center;
+  line-height: 1.4;
+  padding: 12rpx 0;
 }
 
 .dest-set-btn,
