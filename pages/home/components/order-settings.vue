@@ -58,8 +58,15 @@
           >
             <uni-icons type="refresh" size="18" :color="refreshing ? '#9ca3af' : '#3b82f6'"></uni-icons>
           </view>
-          <view v-if="currentBatch" class="badge-tag" :class="{ 'tag-confirmed': currentBatch.batch && currentBatch.batch.status !== '0' }">
-            {{ currentBatch.batch && currentBatch.batch.status !== '0' ? '已确认' : '已加载' }}
+          <view
+            v-if="currentBatch"
+            class="badge-tag"
+            :class="{
+              'tag-confirmed': batchStatus === '1' || batchStatus === '2',
+              'tag-finished': batchStatus === '3'
+            }"
+          >
+            {{ batchStatusText }}
           </view>
         </view>
 
@@ -137,15 +144,20 @@
             </view>
           </scroll-view>
 
-          <!-- 确认/取消订单按钮 -->
+          <!-- 确认/取消/完成订单按钮 -->
           <view class="action-btn-row">
             <view
               class="action-btn confirm-btn"
-              :class="{ 'btn-disabled': !canConfirm, 'btn-loading': confirming, 'btn-producing': isProducing }"
+              :class="{
+                'btn-disabled': !canConfirm && !isFinished,
+                'btn-loading': confirming,
+                'btn-producing': isProducing,
+                'btn-finished': isFinished
+              }"
               @tap="confirmOrder"
             >
               <text class="btn-text">
-                {{ confirming ? '确认中…' : (isProducing ? '正在生产中' : '允许生产') }}
+                {{ confirming ? '确认中…' : (isFinished ? '已完成' : (isProducing ? '正在生产中' : '允许生产')) }}
               </text>
             </view>
             <view
@@ -154,6 +166,13 @@
               @tap="cancelOrder"
             >
               <text class="btn-text">{{ canceling ? '取消中…' : '取消执行' }}</text>
+            </view>
+            <view
+              class="action-btn finish-btn"
+              :class="{ 'btn-disabled': !canFinish, 'btn-loading': finishing }"
+              @tap="finishOrder"
+            >
+              <text class="btn-text">{{ finishing ? '完成中…' : '完成订单' }}</text>
             </view>
           </view>
         </view>
@@ -171,7 +190,8 @@
           <view class="section-dot dot-orange"></view>
           <text class="section-title">设置目的地</text>
           <view v-if="currentDest" class="badge-tag tag-orange">{{ currentDest }}</view>
-          <view v-if="!isProducing && currentBatch" class="badge-tag tag-locked">需先允许生产</view>
+          <view v-if="isFinished && currentBatch" class="badge-tag tag-finished">订单已完成</view>
+          <view v-else-if="!isProducing && currentBatch" class="badge-tag tag-locked">需先允许生产</view>
         </view>
         <view class="section-card">
           <!-- 目的地选择框：MSE 模式不允许手动改；MOCK 模式可手动选/设/取消 -->
@@ -251,6 +271,11 @@ export default {
       scanning: false,
       confirming: false,
       canceling: false,
+      finishing: false,
+      // 执行中订单状态轮询（同步 WCS 上货自动完单等）
+      statusPollTimer: null,
+      statusPolling: false,
+      componentAlive: true,
       // MSE信息（BatchDetailDTO: { batch, pallets: [{ palletNo, trayStatus, goods: [...] }] }）
       currentBatch: null,
       // 目的地选择
@@ -292,24 +317,42 @@ export default {
       })
       return map
     },
+    batchStatus() {
+      return (this.currentBatch && this.currentBatch.batch && this.currentBatch.batch.status) || ''
+    },
+    batchStatusText() {
+      const map = { '0': '待确认', '1': '已确认', '2': '生产中', '3': '已完成' }
+      return map[this.batchStatus] || '已加载'
+    },
     isProducing() {
-      return this.currentBatch &&
-        this.currentBatch.batch &&
-        (this.currentBatch.batch.status === '1' || this.currentBatch.batch.status === '2')
+      return this.batchStatus === '1' || this.batchStatus === '2'
+    },
+    isFinished() {
+      return this.batchStatus === '3'
     },
     canConfirm() {
       return this.currentBatch &&
         this.currentBatch.batch &&
-        this.currentBatch.batch.status === '0' &&
+        this.batchStatus === '0' &&
         !this.confirming &&
-        !this.canceling
+        !this.canceling &&
+        !this.finishing
     },
     canCancel() {
       return this.currentBatch &&
         this.currentBatch.batch &&
-        (this.currentBatch.batch.status === '1' || this.currentBatch.batch.status === '2') &&
+        this.isProducing &&
         !this.confirming &&
-        !this.canceling
+        !this.canceling &&
+        !this.finishing
+    },
+    canFinish() {
+      return this.currentBatch &&
+        this.currentBatch.batch &&
+        this.isProducing &&
+        !this.confirming &&
+        !this.canceling &&
+        !this.finishing
     },
     isMseMode() {
       return this.scanMode === 'mse'
@@ -332,15 +375,30 @@ export default {
   },
   watch: {
     // 切回订单设置 tab 时重新查询（首屏由 mounted 负责）
-    active(val, oldVal) {
-      if (val && oldVal === false) {
-        this.loadExecutingOrder()
+    active(val) {
+      if (val) {
+        this.loadExecutingOrder().finally(() => {
+          this.syncStatusPoll()
+        })
+      } else {
+        // 切走 tab：立即停轮询，避免后台叠加请求
+        this.stopStatusPoll()
       }
+    },
+    // 允许生产 / 完成 / 取消后同步启停轮询
+    isProducing() {
+      this.syncStatusPoll()
     }
   },
   async mounted() {
     await this.loadExecutingOrder()
     this.pageReady = true
+    this.syncStatusPoll()
+  },
+  beforeDestroy() {
+    // 退出登录 reLaunch / 页面销毁时必须清理，防止重新登录叠加定时器
+    this.componentAlive = false
+    this.stopStatusPoll()
   },
   methods: {
 
@@ -362,6 +420,7 @@ export default {
         }
       } finally {
         this.pageLoading = false
+        this.syncStatusPoll()
       }
     },
 
@@ -388,6 +447,75 @@ export default {
         }
       } catch (e) {
         console.error('重新加载批次数据失败:', e)
+      }
+    },
+
+    /** 仅在「订单设置 tab 可见 + 执行中」时轮询；启动前先 stop，保证单实例 */
+    syncStatusPoll() {
+      if (
+        this.active &&
+        this.isProducing &&
+        this.currentBatch &&
+        this.currentBatch.batch &&
+        this.currentBatch.batch.id
+      ) {
+        this.startStatusPoll()
+      } else {
+        this.stopStatusPoll()
+      }
+    },
+
+    startStatusPoll() {
+      this.stopStatusPoll()
+      this.statusPollTimer = setInterval(() => {
+        this.pollBatchStatus()
+      }, 4000)
+    },
+
+    stopStatusPoll() {
+      if (this.statusPollTimer != null) {
+        clearInterval(this.statusPollTimer)
+        this.statusPollTimer = null
+      }
+      this.statusPolling = false
+    },
+
+    /** 静默按 ID 拉最新状态；检测到自动完单后停轮询并提示 */
+    async pollBatchStatus() {
+      if (!this.componentAlive || !this.active || !this.isProducing || this.statusPolling) return
+      const batchId = this.currentBatch && this.currentBatch.batch && this.currentBatch.batch.id
+      if (!batchId) {
+        this.stopStatusPoll()
+        return
+      }
+      this.statusPolling = true
+      const prevStatus = this.batchStatus
+      try {
+        const res = await request.get('/produce_batch/getById', { id: batchId })
+        // 请求回来时组件可能已销毁 / tab 已切走 / 定时器已停
+        if (!this.componentAlive || !this.active || this.statusPollTimer == null) return
+        if (res && res.code === '200' && res.data) {
+          this.currentBatch = res.data
+          if (this.isFinished) {
+            this.currentDest = ''
+            this.currentDestRecordId = null
+            this.destIndex = -1
+            this.stopStatusPoll()
+            if (prevStatus === '1' || prevStatus === '2') {
+              uni.showToast({ title: '订单已完成', icon: 'success', duration: 1500 })
+            }
+          } else if (this.isProducing) {
+            await this.loadCurrentDest(batchId)
+          } else {
+            this.stopStatusPoll()
+          }
+        }
+      } catch (e) {
+        console.error('轮询批次状态失败:', e)
+      } finally {
+        if (this.componentAlive) {
+          this.statusPolling = false
+        }
       }
     },
 
@@ -418,6 +546,7 @@ export default {
       } finally {
         this.refreshing = false
         this.pageLoading = false
+        this.syncStatusPoll()
       }
     },
 
@@ -715,6 +844,35 @@ export default {
             uni.showToast({ title: '取消失败，请重试', icon: 'none' })
           } finally {
             this.canceling = false
+          }
+        }
+      })
+    },
+
+    async finishOrder() {
+      if (!this.canFinish) return
+      uni.showModal({
+        title: '完成订单',
+        content: `确认完成批次 ${this.currentBatch.batch.batchNo} 吗？完成后将不再作为执行中订单。`,
+        success: async (res) => {
+          if (!res.confirm) return
+          this.finishing = true
+          try {
+            const ret = await request.post('/produce_batch/finish', { id: this.currentBatch.batch.id })
+            if (ret && ret.code === '200') {
+              this.currentBatch.batch.status = '3'
+              this.currentDest = ''
+              this.currentDestRecordId = null
+              this.destIndex = -1
+              uni.showToast({ title: '订单已完成', icon: 'success', duration: 1500 })
+            } else {
+              uni.showToast({ title: ret?.message || '完成失败，请重试', icon: 'none', duration: 2500 })
+            }
+          } catch (e) {
+            console.error('完成批次失败:', e)
+            uni.showToast({ title: '完成失败，请重试', icon: 'none' })
+          } finally {
+            this.finishing = false
           }
         }
       })
@@ -1084,6 +1242,11 @@ export default {
     background: #dbeafe;
   }
 
+  &.tag-finished {
+    color: #059669;
+    background: #d1fae5;
+  }
+
   &.tag-locked {
     color: #ef4444;
     background: #fee2e2;
@@ -1448,6 +1611,20 @@ export default {
   background: #f3f4f6;
   border: 1rpx solid #e5e7eb;
   .btn-text { color: #6b7280; }
+}
+
+.finish-btn {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  box-shadow: 0 4rpx 12rpx rgba(37, 99, 235, 0.28);
+  .btn-text { color: #fff; }
+}
+
+.confirm-btn.btn-finished {
+  background: #d1fae5 !important;
+  box-shadow: none !important;
+  animation: none !important;
+  .btn-text { color: #059669 !important; }
+  &::before { display: none; }
 }
 
 .mse-batch-row {
