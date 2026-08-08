@@ -1,14 +1,14 @@
 <template>
   <view class="order-settings">
-    <view class="page-layout" :style="{ opacity: pageReady ? 1 : 0 }">
-
-      <!-- 页面级 loading 遮罩 -->
-      <view v-if="pageLoading" class="page-loading-overlay">
-        <view class="page-loading-box">
-          <loading-spin :size="48"></loading-spin>
-          <text class="page-loading-text">{{ pageLoadingText }}</text>
-        </view>
+    <!-- loading 放在 opacity 容器外，避免首屏请求时整页（含转圈）不可见 -->
+    <view v-if="pageLoading" class="page-loading-overlay">
+      <view class="page-loading-box">
+        <loading-spin :size="48"></loading-spin>
+        <text class="page-loading-text">{{ pageLoadingText }}</text>
       </view>
+    </view>
+
+    <view class="page-layout" :style="{ opacity: pageReady ? 1 : 0 }">
 
       <!-- 来货查询区域（固定高度） -->
       <view class="section section-query">
@@ -88,7 +88,7 @@
                 <!-- 托盘头 -->
                 <view class="pallet-header">
                   <view class="pallet-index-badge">{{ pIndex + 1 }}</view>
-                  <text class="pallet-no">托盘 {{ pallet.palletNo || ('P' + (pIndex + 1)) }}</text>
+                  <text class="pallet-no">{{ pallet.palletNo }}</text>
                   <button
                     class="add-goods-btn"
                     size="mini"
@@ -96,7 +96,7 @@
                     plain
                     :disabled="addGoodsPalletId === pallet.id"
                     @tap="handleAddGoodsBtnTap(pallet)"
-                  >+ 扫码添加箱子</button>
+                  >+ 添加箱子</button>
                   <view class="pallet-header-spacer"></view>
                   <view class="pallet-status-badge" :class="'pstatus-' + pallet.trayStatus">
                     {{ { '0': '待扫', '1': '部分扫', '2': '已完成' }[pallet.trayStatus] || '待扫' }}
@@ -235,6 +235,9 @@ export default {
   name: 'OrderSettings',
   components: { PdaScan, LoadingSpin },
   inject: ['provideWsClient', 'provideWsConnected'],
+  props: {
+    active: { type: Boolean, default: true }
+  },
   data() {
     return {
       pageReady: false,
@@ -319,22 +322,46 @@ export default {
         !this.destCanceling
     }
   },
-  async mounted() {
-    await this.loadCurrentExecuting()
-    if (this.isProducing && this.currentBatch && this.currentBatch.batch) {
-      await this.loadCurrentDest(this.currentBatch.batch.id)
+  watch: {
+    // 切回订单设置 tab 时重新查询（首屏由 mounted 负责）
+    active(val, oldVal) {
+      if (val && oldVal === false) {
+        this.loadExecutingOrder()
+      }
     }
+  },
+  async mounted() {
+    await this.loadExecutingOrder()
     this.pageReady = true
   },
   methods: {
 
     // ============ 来货查询 ============
 
+    /** 查当前执行中订单 + 目的地；无执行中订单则清空 */
+    async loadExecutingOrder() {
+      this.pageLoading = true
+      this.pageLoadingText = '加载当前订单…'
+      try {
+        await this.loadCurrentExecuting()
+        if (this.isProducing && this.currentBatch && this.currentBatch.batch) {
+          await this.loadCurrentDest(this.currentBatch.batch.id)
+        } else {
+          this.currentBatch = null
+          this.currentDest = ''
+          this.currentDestRecordId = null
+          this.destIndex = -1
+        }
+      } finally {
+        this.pageLoading = false
+      }
+    },
+
     async loadCurrentExecuting() {
       try {
         const res = await request.get('/produce_batch/getCurrentExecuting')
-        if (res && res.code === '200' && res.data) {
-          this.currentBatch = res.data
+        if (res && res.code === '200') {
+          this.currentBatch = res.data || null
         }
       } catch (e) {
         console.error('加载正在执行批次失败:', e)
