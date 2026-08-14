@@ -162,10 +162,13 @@ export default {
     totalCount() {
       return ((this.currentPallet && this.currentPallet.goods) || []).length
     },
-    // 下发通行命令：需要有托盘、目的地、且全部扫完
+    allScanned() {
+      return this.totalCount > 0 && this.scannedCount === this.totalCount
+    },
+    // 下发通行命令：有托盘、目的地即可点（未全部扫完时走强制通行确认）
     canSendCmd() {
       if (!this.currentPallet || !this.currentDestination || this.sendingCmd || this.loading) return false
-      return this.totalCount > 0 && this.scannedCount === this.totalCount
+      return this.totalCount > 0
     }
   },
   async mounted() {
@@ -260,6 +263,7 @@ export default {
       try {
         const res = await request.post('/produce_goods/markScanned', {
           uid: uid,
+          batchId: target.batchId,
           scanLocation: 'PDA-RECHECK'
         })
         if (res && res.code === '200') {
@@ -308,12 +312,7 @@ export default {
     },
 
     async handleSendCommand() {
-      if (!this.canSendCmd) {
-        if (this.currentPallet && this.scannedCount < this.totalCount) {
-          uni.showToast({ title: `还有 ${this.totalCount - this.scannedCount} 件货物未扫码，请全部扫完后再下发`, icon: 'none', duration: 2000 })
-        }
-        return
-      }
+      if (!this.canSendCmd) return
       // 先检查WebSocket连接，避免后端接口已执行但PLC命令未发送
       const wsClient = this.provideWsClient()
       const wsConnected = this.provideWsConnected()
@@ -321,71 +320,91 @@ export default {
         uni.showToast({ title: '未连接到服务器，无法下发PLC命令', icon: 'none', duration: 2000 })
         return
       }
+      const palletLabel = this.currentPallet.palletNo || this.currentPallet.id
+      if (!this.allScanned) {
+        const unscanned = this.totalCount - this.scannedCount
+        uni.showModal({
+          title: '强制通行',
+          content: `还有 ${unscanned} 件货物未扫码，是否强制通行？`,
+          confirmText: '强制通行',
+          cancelText: '取消',
+          confirmColor: '#ef4444',
+          success: (modal) => {
+            if (!modal.confirm) return
+            this.doSendCommand()
+          }
+        })
+        return
+      }
       uni.showModal({
         title: '下发通行命令',
-        content: `确认为托盘 ${this.currentPallet.palletNo || this.currentPallet.id} 下发通行命令？`,
+        content: `确认为托盘 ${palletLabel} 下发通行命令？`,
         confirmText: '确认',
         cancelText: '取消',
-        success: async (modal) => {
+        success: (modal) => {
           if (!modal.confirm) return
-          this.sendingCmd = true
-          this.pageLoading = true
-          this.pageLoadingText = '下发中…'
-          try {
-            // 1. 调后端重新发送目的地（999→正确目的地+1/2后缀）
-            const res = await request.post('/produce_pallet/resendDestination', {
-              palletId: String(this.currentPallet.id),
-              virtualId: this.currentPallet.virtualId,
-              destinationCode: this.currentDestination.destinationCode
-            })
-            if (res && res.code === '200' && res.data) {
-              const updated = res.data
-              const destValue = parseInt(updated.sendDestinationCode, 10)
-
-              // 2. 写PLC：DB1001.DBW24=1006，DB1001.DBW26=目的地值，DB1001.DBW182=1，持续2秒后取消
-              //    DB1001.DBW184=1 晚1秒再发，持续2秒后取消
-              const writtenAddresses = []
-              this.sendPlcCommand('W_DBW24', 1006)
-              writtenAddresses.push('W_DBW24')
-              this.sendPlcCommand('W_DBW26', destValue)
-              writtenAddresses.push('W_DBW26')
-              this.sendPlcCommand('W_DBW182', 1)
-              writtenAddresses.push('W_DBW182')
-              setTimeout(() => {
-                writtenAddresses.forEach(addr => {
-                  this.sendPlcCancelWrite(addr)
-                })
-              }, 2000)
-              setTimeout(() => {
-                this.sendPlcCommand('W_DBW184', 1)
-                setTimeout(() => {
-                  this.sendPlcCancelWrite('W_DBW184')
-                }, 2000)
-              }, 1000)
-
-              uni.showToast({ title: `通行命令已下发：${updated.sendDestinationCode}`, icon: 'success', duration: 2000 })
-              // 通知PC端托盘数据变更（带上palletId和新目的地编码）
-              const wsClient = this.provideWsClient()
-              if (wsClient) {
-                wsClient.sendTrayDataChanged({
-                  palletId: String(updated.id),
-                  sendDestinationCode: updated.sendDestinationCode
-                })
-              }
-              // 刷新拿到下一个异常托盘
-              await this.loadData()
-            } else {
-              uni.showToast({ title: res?.message || '下发失败，请重试', icon: 'none', duration: 2000 })
-            }
-          } catch (e) {
-            console.error('下发通行命令失败:', e)
-            uni.showToast({ title: '网络异常，请重试', icon: 'none' })
-          } finally {
-            this.sendingCmd = false
-            this.pageLoading = false
-          }
+          this.doSendCommand()
         }
       })
+    },
+
+    async doSendCommand() {
+      this.sendingCmd = true
+      this.pageLoading = true
+      this.pageLoadingText = '下发中…'
+      try {
+        // 1. 调后端重新发送目的地（999→正确目的地+1/2后缀）
+        const res = await request.post('/produce_pallet/resendDestination', {
+          palletId: String(this.currentPallet.id),
+          virtualId: this.currentPallet.virtualId,
+          destinationCode: this.currentDestination.destinationCode
+        })
+        if (res && res.code === '200' && res.data) {
+          const updated = res.data
+          const destValue = parseInt(updated.sendDestinationCode, 10)
+
+          // 2. 写PLC：DB1001.DBW24=1006，DB1001.DBW26=目的地值，DB1001.DBW182=1，持续2秒后取消
+          //    DB1001.DBW184=1 晚1秒再发，持续2秒后取消
+          const writtenAddresses = []
+          this.sendPlcCommand('W_DBW24', 1006)
+          writtenAddresses.push('W_DBW24')
+          this.sendPlcCommand('W_DBW26', destValue)
+          writtenAddresses.push('W_DBW26')
+          this.sendPlcCommand('W_DBW182', 1)
+          writtenAddresses.push('W_DBW182')
+          setTimeout(() => {
+            writtenAddresses.forEach(addr => {
+              this.sendPlcCancelWrite(addr)
+            })
+          }, 2000)
+          setTimeout(() => {
+            this.sendPlcCommand('W_DBW184', 1)
+            setTimeout(() => {
+              this.sendPlcCancelWrite('W_DBW184')
+            }, 2000)
+          }, 1000)
+
+          uni.showToast({ title: `通行命令已下发：${updated.sendDestinationCode}`, icon: 'success', duration: 2000 })
+          // 通知PC端托盘数据变更（带上palletId和新目的地编码）
+          const wsClient = this.provideWsClient()
+          if (wsClient) {
+            wsClient.sendTrayDataChanged({
+              palletId: String(updated.id),
+              sendDestinationCode: updated.sendDestinationCode
+            })
+          }
+          // 刷新拿到下一个异常托盘
+          await this.loadData()
+        } else {
+          uni.showToast({ title: res?.message || '下发失败，请重试', icon: 'none', duration: 2000 })
+        }
+      } catch (e) {
+        console.error('下发通行命令失败:', e)
+        uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+      } finally {
+        this.sendingCmd = false
+        this.pageLoading = false
+      }
     }
   }
 }

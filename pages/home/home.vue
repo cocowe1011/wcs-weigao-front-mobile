@@ -24,10 +24,11 @@
 
     <!-- 内容区域 -->
     <view class="page-body">
-      <order-settings v-show="activeTab === 'order'" />
+      <order-settings v-show="activeTab === 'order'" :active="activeTab === 'order'" />
       <scan-recheck v-show="activeTab === 'scan'" />
       <info-edit v-show="activeTab === 'info'" />
-      <manual-control v-show="activeTab === 'manual'" />
+      <!-- 暂时屏蔽手动控制 -->
+      <manual-control v-if="false" v-show="activeTab === 'manual'" />
     </view>
 
     <!-- 底部标签导航 -->
@@ -68,8 +69,9 @@
         <text class="tab-label">信息修改</text>
       </view>
 
-      <!-- 手动控制 -->
+      <!-- 暂时屏蔽：手动控制 -->
       <view
+        v-if="false"
         class="tab-item"
         :class="{ active: activeTab === 'manual' }"
         @tap="activeTab = 'manual'"
