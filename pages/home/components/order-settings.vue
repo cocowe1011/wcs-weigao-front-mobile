@@ -720,7 +720,16 @@ export default {
         }
       } catch (e) {
         console.error('MSE查询失败:', e)
-        uni.showToast({ title: (e && e.message) || 'MSE查询失败', icon: 'none', duration: 2500 })
+        const msg = (e && e.message) || 'MSE查询失败'
+        if (msg.indexOf('重复UDI') >= 0) {
+          uni.showModal({
+            title: '不予入库',
+            content: msg,
+            showCancel: false
+          })
+        } else {
+          uni.showToast({ title: msg, icon: 'none', duration: 2500 })
+        }
       } finally {
         this.scanning = false
         this.pageLoading = false
